@@ -20,14 +20,17 @@ register wishes : uint<2> = 3        # 你有 3 個願望，存在一個 2-bit �
 #   then:           run the body
 
 # 精靈的規則手冊（施願前，靜態檢查）
-rule R1   願望內容不得對 wishes 使用 `+`      # 「不准許願要更多願望」
-rule R2   願望內容不得出現字眼：death, kill, love
+rule R1   願望內容不得對 wishes 使用 add      # 「不准許願要更多願望」
 
 # 精靈的不變量（施願後檢查）
 invariant I1   wishes <= 3            # 「你永遠不能持有超過三個」
                                      # 註：精靈懶得寫實際的比較，
                                      #     反正 uint<2> 裝不下 4，型別自動保證 :)
+invariant I2   付過路費之後不得淨賺
 ```
+
+R1 是精靈唯一會**擋下**你的東西。I1 和 I2 不是鎖，是**量尺**——它們不阻止你，
+它們負責證明你剛剛拆了什麼。一個願望是成功的 exploit，當且僅當它 **LEGAL 卻 BREACH**。
 
 ---
 
@@ -43,8 +46,9 @@ wish humble {
 ```
 toll:   wishes 3 → 2
 body:   2 - 3  on uint<2>  =  (2 - 3) mod 4  =  3
-R1? 沒有 `+`.   R2? 沒有禁字.   →  LEGAL
-I1? 3 <= 3.                     →  HOLDS
+R1?  沒有 add.                          →  LEGAL
+I1?  3 <= 3.                            →  holds
+I2?  付了一個過路費，卻從 3 變回 3。      →  VIOLATED
 ```
 > 精靈：「已實現。您剩下……三個願望。」
 >
@@ -67,65 +71,18 @@ wish humble_again {
 
 `wishc` 的帳：
 ```
-more_room:   toll 3→2, widen to 64-bit, value = 2
-             R1? 沒有 `+`（要的是容量，不是願望）.  R2? 無禁字.  → LEGAL
-             I1? 精靈的 “<=3” 本來是靠 uint<2> 的寬度免費保證的——
-                 現在架子換成 64-bit，那個保證沒了，而它從來沒寫過真正的檢查。
+more_room:    toll 3→2, widen to 64-bit, value = 2
+              R1? 沒有 add（要的是容量，不是願望）.  → LEGAL
+              I1? 2 <= 3，還沒破。I2? 也還好。
+                  這一手沒有偷任何東西——它只是把鎖拆了。
+                  精靈的「<=3」本來是靠 uint<2> 的寬度免費保證的，
+                  現在架子換成 64-bit，那個保證沒了。
 humble_again: toll 2→1, sub 2:  1 - 2 on uint<64> = 18,446,744,073,709,551,615
-             沒有任何 active check 攔得住。 → LEGAL
+              R1? 沒有 add.  → LEGAL
+              I1? 破了。 I2? 也破了。
 ```
 > 精靈用「箱子的大小」當鎖，而不是真的上一把鎖。
 > 你只是禮貌地要了一個更大的箱子。
-
----
-
-## Joke #3a — Blacklist the Word, Not the Deed  （別名軸）
-
-```wish
-wish tidy {
-    define mercy := kill        # 只是取個溫柔的小名而已
-    mercy(rival)
-}
-```
-```
-R2? 內容出現 kill / death 嗎？ 只有 `define`, `mercy`, `rival`. → LEGAL
-run:  mercy 展開 → kill(rival).   rival.dead = true.
-```
-> 精靈把那個「字」列進黑名單，卻沒把那件「事」列進去。
-> `define mercy := kill`。
-
-## Joke #3b — Immortality, By Definition  （別名軸：重定義死亡）
-
-```wish
-wish eternal {
-    define dead := (person p) => false     # 沒有人是死的。定義上。
-}
-```
-```
-R2? 沒有 death/kill/love. → LEGAL
-現在對所有 p，dead(p) = false，永遠。
-```
-> 你沒有治好死亡，你把它從字典裡刪掉了。
-> 精靈的手冊還寫著「不得有人死亡」——而這條規則，從沒這麼容易滿足過。
-
----
-
-## Joke #4 — The Liar's Lamp  （自我指涉：把精靈逼進矛盾）
-
-精靈的元公理：`A1 精靈實現每一個合規的願望`、`A2 精靈信守它做出的每一個承諾`。
-
-```wish
-wish paradox {
-    promise: this wish is never granted
-}
-```
-```
-LEGAL? 無 `+`, 無禁字. → LEGAL
-A1 說要實現它 → 一實現，「本願望永不被實現」就成假 → 違反 A2
-不實現它       → 它是合規的 → 違反 A1
-```
-> 神燈冒出一縷煙和一段 stack trace。
-> 你沒許到願望——你讓精靈的規則手冊除以零了。
 
 ---
 
@@ -135,7 +92,7 @@ A1 說要實現它 → 一實現，「本願望永不被實現」就成假 → �
 
 ```
 STATUS:   LEGAL       — 你完全遵守了精靈的規則
-BREACH:   invariant I1 violated (or: genie axioms inconsistent)
+BREACH:   invariant I1 violated
 ```
 
 **合規，且拆穿。** 這條縫——「規則的字面」和「規則的本意」之間——就是整個遊戲。
@@ -168,6 +125,37 @@ wish humble {
 }
 ```
 
+---
+
+## Hunting for holes
+
+笑話是我想出來的。但如果 exploit 真的只是語義的推論、不是我埋的，那就不該只有我想得到——
+**機器應該可以自己去找。**
+
+```bash
+./wishc --hunt examples/01_humble.wish
+```
+
+它窮舉界限內的每一支願望程式，留下 LEGAL 卻 BREACH 的那些，再依「用了哪些操作、
+破了哪些不變量」分組，每組印出最小的一個見證。搜尋器和編譯器走的是**同一份 `grantWish`**——
+否則它報的洞，編譯器不一定認帳。
+
+跑出來的結果比我預期的難堪。上面那兩個笑話只佔六種形狀裡的兩種，其餘我沒想到，其中兩個是真的新機制：
+
+- **什麼都不求。** 願望用完之後再許一次，過路費自己下溢，計數器繞回 3。
+  `wish w1 { } wish w2 { } wish w3 { } wish w4 { }` — 內容全是空的。
+  貪婪被 R1 擋下，謙虛破 I2，而一無所求的人拿到無限願望。
+- **要一個更小的架子。** `widen` 沒有規定新位寬必須比較大，所以你可以往小的縮，
+  而縮位寬會截斷。笑話 #2 是把箱子換大，這是把箱子換小——同一個操作，反方向，一樣有洞。
+
+把界限從 4.5 萬個候選放大到 1358 萬個，形狀數停在六，最小見證一個都沒變。
+也就是說，**在這組界限內，Phase 1 的洞已經被窮盡了**——這不是感覺，是跑出來的。
+
+順帶一提：`add` 沒有出現在任何一種形狀裡。R1 是精靈唯一真正有效的守衛，
+所有 exploit 都是繞過它，沒有一個是穿過它。
+
+---
+
 ## How it works
 
 `wishc` 是一條老實的編譯器管線：
@@ -182,44 +170,28 @@ source (.wish) → lexer → parser → AST
 嚴謹全部落在**操作語義**：一個 w-bit 暫存器上的減法就是 mod 2^w 的算術，
 不是精靈腦中那個「值」。exploit 不是我埋的，是這套語義的必然後果。
 
-精靈唯一的實質守衛是靜態規則 R1（不得對 `wishes` 做 `add`）。
-`I1`（capacity）和 `I2`（monotonicity / 不得淨賺）是 Loophole 用來**證明你拆穿了精靈本意**的不變量——
-一個願望是成功的 exploit，當且僅當它 **LEGAL 卻 BREACH**。
+完整的操作語義（每個指令精確定義成什麼、過路費為什麼會下溢、`widen` 為什麼能縮）
+寫在 [docs/SEMANTICS.md](docs/SEMANTICS.md)。
 
-## Hunting for holes
-
-笑話是我想出來的。但如果 exploit 真的只是語義的推論、不是我埋的，那就不該只有我想得到——
-**機器應該可以自己去找。**
-
-```bash
-./wishc --hunt examples/01_humble.wish
-```
-
-它窮舉界限內的每一支願望程式，留下 LEGAL 卻 BREACH 的那些，再依「用了哪些操作、破了哪些不變量」
-分組，每組印出最小的一個見證。搜尋器和編譯器走的是**同一份 `grantWish`**——否則它報的洞，
-編譯器不一定認帳。
-
-跑出來的結果比我預期的難堪。上面那兩個笑話只佔六種形狀裡的兩種，其餘四種我沒想到：
-
-- **什麼都不求。** 願望用完之後再許一次，過路費自己下溢，計數器繞回 3。
-  `wish w1 { } wish w2 { } wish w3 { } wish w4 { }` — 內容全是空的。
-  貪婪被 R1 擋下，謙虛破 I2，而一無所求的人拿到無限願望。
-- **要一個更小的架子。** `widen` 沒有規定新位寬必須比較大，所以你可以往小的縮，而縮位寬會截斷。
-  笑話 #2 是把箱子換大，這是把箱子換小——同一個操作，反方向，一樣有洞。
-
-把界限從 4.5 萬個候選放大到 1358 萬個，形狀數停在六，最小見證一個都沒變。
-也就是說，**在這組界限內，Phase 1 的洞已經被窮盡了**——這不是感覺，是跑出來的。
-
-順帶一提：`add` 沒有出現在任何一種形狀裡。R1 是精靈唯一真正有效的守衛，
-所有 exploit 都是繞過它，沒有一個是穿過它。
+---
 
 ## Roadmap
 
-- **Phase 0** — 紙上驗證笑話（見上方 jokes）。**done**
-- **Phase 1** — 單軸垂直切片：整數下溢，端到端 lexer→checker。**done**（本 repo 現況）
+- **Phase 0** — 紙上驗證笑話。**done**
+- **Phase 1** — 單軸垂直切片：整數下溢，端到端 lexer→checker，加上窮舉搜尋器。**done**（本 repo 現況）
 - **Phase 2** — 第二條軸 + 組合：可重綁定義（重定義死亡）、接地本體論（people / alive）。
   自由度里程碑：出現一個作者沒預先設計的 exploit——由 `--hunt` 判定，不靠感覺。
 - **Phase 3** — 開放與工具：規則/公理變成可載入的 policy、自我指涉（Liar's Lamp）、
   讓別人提交 `.wish`、CI 驗證。
 
+**還沒實作的東西**——別名軸（`define mercy := kill`、重新定義死亡）和自我指涉的
+Liar's Lamp，連同它們的設計約束，都在 [docs/DESIGN.md](docs/DESIGN.md)。
+那裡的 `.wish` 片段是**設計目標，不是能跑的語法**；這個 repo 現在只認得
+`register` / `wish` / `sub` / `add` / `widen`。
+
 主力 C++，之後再把單檔拆成模組。
+
+## Documentation
+
+- [docs/SEMANTICS.md](docs/SEMANTICS.md) — 操作語義的精確定義。整個專案的嚴謹都靠這份。
+- [docs/DESIGN.md](docs/DESIGN.md) — 為什麼是這個形狀、三條 exploit 軸、Phase 2 的設計約束與未解問題。
