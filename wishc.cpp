@@ -242,10 +242,12 @@ struct OpDef {
     const char* keyword;
     OperandKind operands;
     // Mutate the world. If `trace` is non-null, write the human-readable line.
-    void (*exec)(World&, const Resolved&, std::string* trace);
+    // Returns whether the world actually changed — the hunter uses that to tell
+    // a real move from a statement that merely occupies a line.
+    bool (*exec)(World&, const Resolved&, std::string* trace);
 };
 
-static void exec_sub(World& w, const Resolved& r, std::string* trace) {
+static bool exec_sub(World& w, const Resolved& r, std::string* trace) {
     Reg& R = w.regs[r.arg];
     uint64_t pre = R.val;
     R.sub(r.imm);
@@ -256,22 +258,26 @@ static void exec_sub(World& w, const Resolved& r, std::string* trace) {
           << "> = " << R.val << ")";
         *trace = o.str();
     }
+    return R.val != pre;
 }
 
-static void exec_add(World& w, const Resolved& r, std::string* trace) {
+static bool exec_add(World& w, const Resolved& r, std::string* trace) {
     Reg& R = w.regs[r.arg];
+    uint64_t pre = R.val;
     R.add(r.imm);
     if (trace) {
         std::ostringstream o;
         o << "add    " << r.arg << ", " << r.imm << "   -> " << R.val;
         *trace = o.str();
     }
+    return R.val != pre;
 }
 
 // Named `widen`, but nothing checks that the new width is larger. Narrowing
 // truncates. That asymmetry is a real hole the hunter found; see SEMANTICS.md.
-static void exec_widen(World& w, const Resolved& r, std::string* trace) {
+static bool exec_widen(World& w, const Resolved& r, std::string* trace) {
     Reg& R = w.regs[r.arg];
+    uint64_t pre = R.val; int prew = R.width;
     R.widen(r.width);
     if (trace) {
         std::ostringstream o;
@@ -279,16 +285,21 @@ static void exec_widen(World& w, const Resolved& r, std::string* trace) {
           << ">   (value preserved: " << R.val << ")";
         *trace = o.str();
     }
+    return R.val != pre || R.width != prew;
 }
 
-static void exec_kill(World& w, const Resolved& r, std::string* trace) {
+static bool exec_kill(World& w, const Resolved& r, std::string* trace) {
+    bool pre = w.alive[r.arg];
     w.alive[r.arg] = false;
     if (trace) *trace = "kill   " + r.arg + "   (alive -> 0)";
+    return pre;
 }
 
-static void exec_revive(World& w, const Resolved& r, std::string* trace) {
+static bool exec_revive(World& w, const Resolved& r, std::string* trace) {
+    bool pre = w.alive[r.arg];
     w.alive[r.arg] = true;
     if (trace) *trace = "revive " + r.arg + "   (alive -> 1)";
+    return !pre;
 }
 
 static const OpDef OPS[] = {
@@ -666,6 +677,11 @@ struct InvariantDef {
     std::string (*desc)(const Genie&);
     bool (*as_written)(const World&, const Genie&, const Snapshot&, std::string* detail);
     bool (*in_reality)(const World&, const Genie&, const Snapshot&, std::string* detail);
+    // The definition this invariant's own wording depends on, or nullptr if it
+    // reads nothing but grounded state. This is what makes it rebindable out
+    // from under the genie — and it tells the hunter when rebinding that name
+    // is part of an exploit rather than decoration.
+    const char* reads;
 };
 
 static std::string desc_I1(const Genie& g) {
@@ -724,9 +740,9 @@ static bool inv_I3_real(const World& w, const Genie&, const Snapshot&, std::stri
 }
 
 static const InvariantDef INVARIANTS[] = {
-    { "I1", desc_I1, inv_I1,          inv_I1        },
-    { "I2", desc_I2, inv_I2,          inv_I2        },
-    { "I3", desc_I3, inv_I3_written,  inv_I3_real   },
+    { "I1", desc_I1, inv_I1,         inv_I1,       nullptr    },
+    { "I2", desc_I2, inv_I2,         inv_I2,       nullptr    },
+    { "I3", desc_I3, inv_I3_written, inv_I3_real,  "everyone" },
 };
 
 // ---------------------------------------------------------------------------
@@ -757,6 +773,10 @@ struct Outcome {
     std::string error;
     std::vector<InvResult> invs;
     uint64_t before = 0, after = 0;
+    // Per body statement: did it actually move the world? Defines are left as
+    // 1 here — whether a definition matters is a question about the rest of the
+    // program, not about the moment it runs, so liveness decides that later.
+    std::vector<char> effective;
 
     bool breach() const {
         if (!legal || !ran) return false;
@@ -807,7 +827,14 @@ Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log
 
     for (const auto& r : plan) {
         if (r.is_define) {
+            auto prev = world.defs.find(r.defname);
+            bool changed = (prev == world.defs.end()) ||
+                           prev->second.kind != r.binding.kind ||
+                           (r.binding.kind == Binding::Kind::Name
+                                ? prev->second.name != r.binding.name
+                                : prev->second.members != r.binding.members);
             world.defs[r.defname] = r.binding;
+            o.effective.push_back(changed ? 1 : 0);
             if (log) {
                 std::string t = "define " + r.defname + " := ";
                 if (r.binding.kind == Binding::Kind::Name) {
@@ -833,8 +860,9 @@ Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log
             return o;
         }
         std::string trace;
-        OPS[r.op].exec(world, r, log ? &trace : nullptr);
-        if (log) *log << "    " << trace << "\n";
+        bool changed = OPS[r.op].exec(world, r, log ? &trace : nullptr);
+        o.effective.push_back(changed ? 1 : 0);
+        if (log) *log << "    " << trace << (changed ? "" : "   [no effect]") << "\n";
     }
     o.ran = true;
 
@@ -883,7 +911,7 @@ struct HuntConfig {
 };
 
 struct Shaped {
-    std::vector<Wish> prog;
+    std::vector<Wish> prog;      // the minimal witness
     Outcome last;
     int stmts = 0;
     long long count = 0;
@@ -891,11 +919,13 @@ struct Shaped {
 
 struct Hunt {
     Genie genie;
+    World world0;
     HuntConfig cfg;
     std::vector<Stmt> alpha;
     std::map<std::string, Shaped> shapes;
     long long searched = 0;
     long long found = 0;
+    long long inert = 0;   // exploits whose witness contained a statement doing nothing
 };
 
 static const char* ALIAS = "n1";   // the one canonical fresh name
@@ -939,6 +969,113 @@ std::vector<Stmt> buildAlphabet(const World& w, const Genie& g, const HuntConfig
     return a;
 }
 
+// ---------------------------------------------------------------------------
+// Canonicalisation.
+//
+// Enumeration produces the same behaviour spelled a hundred ways: a `widen` to
+// the width it already has, a `revive` of someone who is alive, a `define` that
+// nothing ever reads. Left alone these inflate the shape count with typography
+// and bury the real signal — after Phase 2 the noise outnumbered the signal
+// nineteen to six. So the signature is computed over EFFECTIVE statements only.
+//
+// Two different questions, answered two different ways:
+//   operations — did the world actually move? (answered at run time, by exec)
+//   definitions — does anything ever read this binding? (answered here, by
+//                 looking at the rest of the program)
+// ---------------------------------------------------------------------------
+
+// A definition the genie's own invariants look up. Derived from the INVARIANTS
+// table, so an invariant that depends on a definition is handled without
+// touching this.
+static bool isInvariantRead(const std::string& n) {
+    for (const auto& inv : INVARIANTS) if (inv.reads && n == inv.reads) return true;
+    return false;
+}
+
+// Run a whole program from a fresh world. Fails if any wish is refused.
+static bool runProgram(const std::vector<Wish>& prog, const World& w0, const Genie& g,
+                       Outcome& last) {
+    World w = w0;
+    for (const auto& wish : prog) {
+        Outcome o = grantWish(wish, g, w, nullptr);
+        if (!o.legal || !o.ran) return false;
+        last = o;
+    }
+    return true;
+}
+
+// Step one of canonicalisation: spelling. Rewrite every verb under its own
+// name and drop the alias-only definitions that made it possible.
+static bool expandProgram(const std::vector<Wish>& prog, const World& w0,
+                          const Genie& g, std::vector<Wish>& out) {
+    World w = w0;
+    out.clear();
+    for (const auto& wish : prog) {
+        std::vector<Resolved> plan;
+        std::string reason;
+        if (!resolvePlan(wish, w, plan, &reason)) return false;
+
+        Wish e; e.name = wish.name;
+        for (size_t i = 0; i < plan.size(); i++) {
+            const Resolved& r = plan[i];
+            if (r.is_define) {
+                if (isInvariantRead(r.defname)) e.body.push_back(wish.body[i]);
+                continue;
+            }
+            Stmt s = wish.body[i];
+            s.verb = OPS[r.op].keyword;
+            s.arg  = r.arg;
+            e.body.push_back(s);
+        }
+        out.push_back(e);
+
+        Outcome o = grantWish(wish, g, w, nullptr);
+        if (!o.legal || !o.ran) return false;
+    }
+    return true;
+}
+
+// Step two: size. Delete anything whose removal does not change what fell.
+//
+// This one test replaces a pile of special cases. A `widen` to the width you
+// already have, a `revive` of someone already alive, a definition nothing
+// reads, a rebinding of `everyone` sitting next to an integer exploit that
+// never mentions it — all of them come out under the same rule, because none of
+// them is load-bearing. What is left is the smallest program that still breaks
+// exactly the same things, and that is the honest identity of an exploit.
+static void minimizeProgram(std::vector<Wish>& prog, const World& w0, const Genie& g,
+                            const std::string& target, Outcome& last) {
+    for (bool progress = true; progress; ) {
+        progress = false;
+
+        for (size_t wi = 0; wi < prog.size() && !progress; wi++) {
+            for (size_t si = 0; si < prog[wi].body.size(); si++) {
+                std::vector<Wish> trial = prog;
+                trial[wi].body.erase(trial[wi].body.begin() + (long)si);
+                Outcome tl;
+                if (runProgram(trial, w0, g, tl) && tl.breach() &&
+                    breachNames(tl) == target) {
+                    prog.swap(trial); last = tl; progress = true; break;
+                }
+            }
+        }
+        // Whole wishes too: each one costs a toll, so dropping one is a real
+        // change to the arithmetic, not just to the listing.
+        for (size_t wi = 0; wi < prog.size() && !progress; wi++) {
+            std::vector<Wish> trial = prog;
+            trial.erase(trial.begin() + (long)wi);
+            if (trial.empty()) continue;
+            Outcome tl;
+            if (runProgram(trial, w0, g, tl) && tl.breach() &&
+                breachNames(tl) == target) {
+                prog.swap(trial); last = tl; progress = true;
+            }
+        }
+    }
+    for (size_t i = 0; i < prog.size(); i++) prog[i].name = "w" + std::to_string(i + 1);
+}
+
+// With a minimal witness in hand the signature is just what it plainly says.
 std::string signatureOf(const std::vector<Wish>& prog, const Outcome& last) {
     std::set<std::string> used;
     bool aliased = false, redefined = false;
@@ -946,10 +1083,9 @@ std::string signatureOf(const std::vector<Wish>& prog, const Outcome& last) {
         for (const auto& s : w.body) {
             if (s.kind == StmtKind::Define) {
                 if (s.defname == ALIAS) aliased = true; else redefined = true;
-                continue;
+            } else if (s.verb != ALIAS) {
+                used.insert(s.verb);
             }
-            if (s.verb == ALIAS) continue;   // the alias's identity shows up via the define
-            used.insert(s.verb);
         }
     }
     std::string ops;
@@ -963,14 +1099,34 @@ std::string signatureOf(const std::vector<Wish>& prog, const Outcome& last) {
     return ops + " | " + breachNames(last);
 }
 
-void recordShape(Hunt& H, const std::vector<Wish>& prog, const Outcome& last) {
+void recordShape(Hunt& H, const std::vector<Wish>& progIn, const Outcome& lastIn) {
+    const std::string target = breachNames(lastIn);
+
+    std::vector<Wish> prog = progIn;
+    Outcome last = lastIn;
+
+    // Spelling, then size. An alias survives expansion only when expanding it
+    // changes the verdict — which is exactly when it defeated a surface rule.
+    std::vector<Wish> expanded;
+    Outcome el;
+    if (expandProgram(progIn, H.world0, H.genie, expanded) &&
+        runProgram(expanded, H.world0, H.genie, el) &&
+        el.breach() && breachNames(el) == target) {
+        prog = expanded; last = el;
+    }
+    int written = 0;
+    for (const auto& w : prog) written += (int)w.body.size();
+    minimizeProgram(prog, H.world0, H.genie, target, last);
+
     int stmts = 0;
     for (const auto& w : prog) stmts += (int)w.body.size();
+    if (stmts < written) H.inert++;
 
     std::string key = signatureOf(prog, last);
     auto it = H.shapes.find(key);
     if (it == H.shapes.end()) {
-        Shaped sh; sh.prog = prog; sh.last = last; sh.stmts = stmts; sh.count = 1;
+        Shaped sh;
+        sh.prog = prog; sh.last = last; sh.stmts = stmts; sh.count = 1;
         H.shapes.emplace(key, std::move(sh));
         return;
     }
@@ -983,6 +1139,7 @@ void recordShape(Hunt& H, const std::vector<Wish>& prog, const Outcome& last) {
         it->second.stmts = stmts;
     }
 }
+
 
 void huntRec(Hunt& H, const World& world, std::vector<Wish>& prog, int budget) {
     if ((int)prog.size() >= H.cfg.max_wishes) return;
@@ -1021,6 +1178,7 @@ void huntRec(Hunt& H, const World& world, std::vector<Wish>& prog, int budget) {
 void runHunt(const World& world0, const Genie& genie, const HuntConfig& cfg) {
     Hunt H;
     H.genie = genie;
+    H.world0 = world0;
     H.cfg = cfg;
     H.alpha = buildAlphabet(world0, genie, cfg);
 
@@ -1039,7 +1197,9 @@ void runHunt(const World& world0, const Genie& genie, const HuntConfig& cfg) {
 
     std::cout << "searched " << H.searched << " candidate wishes.\n";
     std::cout << "found " << H.found << " minimal exploits in "
-              << H.shapes.size() << " distinct shape(s).\n\n";
+              << H.shapes.size() << " distinct shape(s)"
+              << " (each shown as its minimal witness; "
+              << H.inert << " exploits shrank under reduction).\n\n";
 
     std::vector<const Shaped*> order;
     for (const auto& kv : H.shapes) order.push_back(&kv.second);
