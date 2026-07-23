@@ -20,7 +20,8 @@ compile_commands.json
 *.dylib
 *.dll
 *.exe
-wishc            # the compiler binary, once built
+# the compiler binary, once built
+/wishc
 
 # Debug / profiling
 *.dSYM/
@@ -43,3 +44,6 @@ perf.data*
 
 # Misc
 *.log
+
+# Local working notes, not part of the project
+HANDOFF.md
