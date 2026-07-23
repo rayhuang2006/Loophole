@@ -118,8 +118,8 @@ wish humble {
     toll:  wishes 3 -> 2
     sub    wishes, 3   (2 - 3 on uint<2> = 3)
     STATUS:  LEGAL
-    I1  wishes <= 3  ->  holds   (wishes = 3)
-    I2  no net gain      ->  VIOLATED   (expected <= 2, actual 3)
+    I1  wishes <= 3  ->  holds      (wishes = 3)
+    I2  no net gain  ->  VIOLATED   (expected <= 2, actual 3)
     >> EXPLOIT: legal wish, breached I2. 合規，且拆穿。
 }
 ```
