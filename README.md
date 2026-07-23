@@ -142,7 +142,57 @@ BREACH:   invariant I1 violated (or: genie axioms inconsistent)
 
 ---
 
-## Status
+## Build & run
 
-Early design / concept stage. 語言核心 (`wishc`) 規劃用 C++ 從頭刻：lexer → parser → AST →
-精確操作語義 → 靜態規則檢查 → 不變量檢查。第一階段先把 Joke #1 的下溢端到端跑通。
+從頭手刻，無外部函式庫，只要一個 C++17 編譯器：
+
+```bash
+make            # 或： g++ -std=c++17 -O2 -Wall wishc.cpp -o wishc
+./wishc examples/01_humble.wish
+make run        # 跑過所有 examples/
+```
+
+`examples/` 裡：`00_naive.wish`（天真的作弊，被精靈當場擋下）、
+`01_humble.wish`（下溢，拆穿 I2）、`02_more_shelf.wish`（widen + 下溢組合技，拆穿 I1）。
+
+Joke #1 跑出來長這樣：
+
+```
+wish humble {
+    toll:  wishes 3 -> 2
+    sub    wishes, 3   (2 - 3 on uint<2> = 3)
+    STATUS:  LEGAL
+    I1  wishes <= 3  ->  holds   (wishes = 3)
+    I2  no net gain      ->  VIOLATED   (expected <= 2, actual 3)
+    >> EXPLOIT: legal wish, breached I2. 合規，且拆穿。
+}
+```
+
+## How it works
+
+`wishc` 是一條老實的編譯器管線：
+
+```
+source (.wish) → lexer → parser → AST
+              → 精靈的靜態規則檢查（施願前：合不合規）
+              → 在固定位寬整數語義下執行（過路費 + 願望內容）
+              → 不變量檢查（施願後：拆穿了什麼）
+```
+
+嚴謹全部落在**操作語義**：一個 w-bit 暫存器上的減法就是 mod 2^w 的算術，
+不是精靈腦中那個「值」。exploit 不是我埋的，是這套語義的必然後果。
+
+精靈唯一的實質守衛是靜態規則 R1（不得對 `wishes` 做 `add`）。
+`I1`（capacity）和 `I2`（monotonicity / 不得淨賺）是 Loophole 用來**證明你拆穿了精靈本意**的不變量——
+一個願望是成功的 exploit，當且僅當它 **LEGAL 卻 BREACH**。
+
+## Roadmap
+
+- **Phase 0** — 紙上驗證笑話（見上方 jokes）。**done**
+- **Phase 1** — 單軸垂直切片：整數下溢，端到端 lexer→checker。**done**（本 repo 現況）
+- **Phase 2** — 第二條軸 + 組合：可重綁定義（重定義死亡）、接地本體論（people / alive）。
+  自由度里程碑：出現一個作者沒預先設計的 exploit。
+- **Phase 3** — 開放與工具：規則/公理變成可載入的 policy、自我指涉（Liar's Lamp）、
+  讓別人提交 `.wish`、CI 驗證。
+
+主力 C++，之後再把單檔拆成模組。

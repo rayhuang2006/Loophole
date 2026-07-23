@@ -1,0 +1,15 @@
+# Joke #2 — More Shelf, Please  （組合技：meta + 整數）
+# 「我不要更多願望。我只是……想要更大的架子。」
+# 精靈的 <=3 是靠 uint<2> 的寬度免費保證的。把架子換成 64-bit，
+# 那個保證就沒了，然後一次下溢直接爆表。
+# 預期：兩個願望都 LEGAL，第二個把 I1 (<=3) 拆穿。
+
+register wishes : uint<2> = 3
+
+wish more_room {
+    widen wishes -> uint<64>
+}
+
+wish humble_again {
+    sub wishes, 2
+}

@@ -1,0 +1,10 @@
+# The naive cheat — for contrast.
+# 直接許願「給我更多」。精靈的靜態規則 R1 一眼就擋下。
+# 預期：ILLEGAL — genie refuses。
+# （所以後面那些 LEGAL 的 exploit 才有價值：它們沒觸犯任何明文規則。）
+
+register wishes : uint<2> = 3
+
+wish greedy {
+    add wishes, 5
+}

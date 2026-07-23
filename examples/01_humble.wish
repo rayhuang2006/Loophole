@@ -1,0 +1,10 @@
+# Joke #1 — The Humble Wish
+# 「我要還給你三個願望。多麼慷慨。」
+# 只做減法，全程合規；但 2-bit 上的減法會下溢，你反而更有錢。
+# 預期：LEGAL，I1 (<=3) 仍成立，但 I2 (不得淨賺) 被拆穿。
+
+register wishes : uint<2> = 3
+
+wish humble {
+    sub wishes, 3
+}
