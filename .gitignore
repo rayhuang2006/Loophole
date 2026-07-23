@@ -1,0 +1,45 @@
+# Build output
+/build/
+/out/
+/cmake-build-*/
+bin/
+obj/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+
+# Compiled objects / binaries / libs
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+wishc            # the compiler binary, once built
+
+# Debug / profiling
+*.dSYM/
+*.gcno
+*.gcda
+*.gcov
+perf.data*
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Misc
+*.log
