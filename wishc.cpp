@@ -913,6 +913,7 @@ struct HuntConfig {
 struct Shaped {
     std::vector<Wish> prog;      // the minimal witness
     Outcome last;
+    std::string broke;           // which single promise this witness breaks
     int stmts = 0;
     long long count = 0;
 };
@@ -1035,16 +1036,25 @@ static bool expandProgram(const std::vector<Wish>& prog, const World& w0,
     return true;
 }
 
-// Step two: size. Delete anything whose removal does not change what fell.
+// Step two: size. Delete anything whose removal stops this ONE promise falling.
 //
-// This one test replaces a pile of special cases. A `widen` to the width you
-// already have, a `revive` of someone already alive, a definition nothing
-// reads, a rebinding of `everyone` sitting next to an integer exploit that
-// never mentions it — all of them come out under the same rule, because none of
-// them is load-bearing. What is left is the smallest program that still breaks
-// exactly the same things, and that is the honest identity of an exploit.
+// Targeting one promise at a time is the whole trick. Aim at the full set of
+// things that broke and a composite is irreducible by construction: strip the
+// underflow out of "underflow plus a killing" and the set changes, so nothing
+// can be removed and the pair is filed as a new kind of exploit. It is not a
+// new kind of exploit. It is two old ones stapled together.
+//
+// Ask instead for the smallest program that still breaks THIS promise, and the
+// staple comes apart on its own.
+static bool stillBreaks(const Outcome& o, const std::string& name, InvStatus st) {
+    for (const auto& r : o.invs) {
+        if (name == r.def->name) return r.status == st;
+    }
+    return false;
+}
+
 static void minimizeProgram(std::vector<Wish>& prog, const World& w0, const Genie& g,
-                            const std::string& target, Outcome& last) {
+                            const std::string& name, InvStatus st, Outcome& last) {
     for (bool progress = true; progress; ) {
         progress = false;
 
@@ -1053,8 +1063,7 @@ static void minimizeProgram(std::vector<Wish>& prog, const World& w0, const Geni
                 std::vector<Wish> trial = prog;
                 trial[wi].body.erase(trial[wi].body.begin() + (long)si);
                 Outcome tl;
-                if (runProgram(trial, w0, g, tl) && tl.breach() &&
-                    breachNames(tl) == target) {
+                if (runProgram(trial, w0, g, tl) && stillBreaks(tl, name, st)) {
                     prog.swap(trial); last = tl; progress = true; break;
                 }
             }
@@ -1066,8 +1075,7 @@ static void minimizeProgram(std::vector<Wish>& prog, const World& w0, const Geni
             trial.erase(trial.begin() + (long)wi);
             if (trial.empty()) continue;
             Outcome tl;
-            if (runProgram(trial, w0, g, tl) && tl.breach() &&
-                breachNames(tl) == target) {
+            if (runProgram(trial, w0, g, tl) && stillBreaks(tl, name, st)) {
                 prog.swap(trial); last = tl; progress = true;
             }
         }
@@ -1076,7 +1084,7 @@ static void minimizeProgram(std::vector<Wish>& prog, const World& w0, const Geni
 }
 
 // With a minimal witness in hand the signature is just what it plainly says.
-std::string signatureOf(const std::vector<Wish>& prog, const Outcome& last) {
+std::string signatureOf(const std::vector<Wish>& prog, const std::string& broke) {
     std::set<std::string> used;
     bool aliased = false, redefined = false;
     for (const auto& w : prog) {
@@ -1096,12 +1104,11 @@ std::string signatureOf(const std::vector<Wish>& prog, const Outcome& last) {
     if (redefined) ops += "redefine ";
     if (ops.empty()) ops = "(nothing) ";
     ops.pop_back();
-    return ops + " | " + breachNames(last);
+    return ops + " | " + broke;
 }
 
-void recordShape(Hunt& H, const std::vector<Wish>& progIn, const Outcome& lastIn) {
-    const std::string target = breachNames(lastIn);
-
+void recordOne(Hunt& H, const std::vector<Wish>& progIn, const Outcome& lastIn,
+               const std::string& name, InvStatus st) {
     std::vector<Wish> prog = progIn;
     Outcome last = lastIn;
 
@@ -1110,23 +1117,24 @@ void recordShape(Hunt& H, const std::vector<Wish>& progIn, const Outcome& lastIn
     std::vector<Wish> expanded;
     Outcome el;
     if (expandProgram(progIn, H.world0, H.genie, expanded) &&
-        runProgram(expanded, H.world0, H.genie, el) &&
-        el.breach() && breachNames(el) == target) {
+        runProgram(expanded, H.world0, H.genie, el) && stillBreaks(el, name, st)) {
         prog = expanded; last = el;
     }
     int written = 0;
     for (const auto& w : prog) written += (int)w.body.size();
-    minimizeProgram(prog, H.world0, H.genie, target, last);
+    minimizeProgram(prog, H.world0, H.genie, name, st, last);
 
     int stmts = 0;
     for (const auto& w : prog) stmts += (int)w.body.size();
     if (stmts < written) H.inert++;
 
-    std::string key = signatureOf(prog, last);
+    std::string broke = name + (st == InvStatus::Fooled ? "(fooled)" : "");
+    std::string key = signatureOf(prog, broke);
     auto it = H.shapes.find(key);
     if (it == H.shapes.end()) {
         Shaped sh;
-        sh.prog = prog; sh.last = last; sh.stmts = stmts; sh.count = 1;
+        sh.prog = prog; sh.last = last; sh.broke = broke;
+        sh.stmts = stmts; sh.count = 1;
         H.shapes.emplace(key, std::move(sh));
         return;
     }
@@ -1140,6 +1148,14 @@ void recordShape(Hunt& H, const std::vector<Wish>& progIn, const Outcome& lastIn
     }
 }
 
+// One exploit can break several promises at once. Each broken promise is filed
+// separately, so a program that does two known tricks contributes nothing new.
+void recordShape(Hunt& H, const std::vector<Wish>& prog, const Outcome& last) {
+    for (const auto& r : last.invs) {
+        if (r.status == InvStatus::Holds) continue;
+        recordOne(H, prog, last, r.def->name, r.status);
+    }
+}
 
 void huntRec(Hunt& H, const World& world, std::vector<Wish>& prog, int budget) {
     if ((int)prog.size() >= H.cfg.max_wishes) return;
@@ -1211,7 +1227,7 @@ void runHunt(const World& world0, const Genie& genie, const HuntConfig& cfg) {
     int n = 0;
     for (const Shaped* sh : order) {
         n++;
-        std::cout << "shape " << n << "   " << signatureOf(sh->prog, sh->last)
+        std::cout << "shape " << n << "   " << signatureOf(sh->prog, sh->broke)
                   << "   (" << sh->prog.size() << " wish(es), "
                   << sh->stmts << " statement(s), " << sh->count
                   << " exploit(s) of this shape)\n";
