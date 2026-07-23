@@ -1107,22 +1107,46 @@ std::string signatureOf(const std::vector<Wish>& prog, const std::string& broke)
     return ops + " | " + broke;
 }
 
+static std::string progKey(const std::vector<Wish>& prog) {
+    std::string k;
+    for (const auto& w : prog) {
+        k += "{";
+        for (const auto& s : w.body) { k += stmtText(s); k += ";"; }
+        k += "}";
+    }
+    return k;
+}
+
 void recordOne(Hunt& H, const std::vector<Wish>& progIn, const Outcome& lastIn,
                const std::string& name, InvStatus st) {
     std::vector<Wish> prog = progIn;
     Outcome last = lastIn;
 
-    // Spelling, then size. An alias survives expansion only when expanding it
-    // changes the verdict — which is exactly when it defeated a surface rule.
-    std::vector<Wish> expanded;
-    Outcome el;
-    if (expandProgram(progIn, H.world0, H.genie, expanded) &&
-        runProgram(expanded, H.world0, H.genie, el) && stillBreaks(el, name, st)) {
-        prog = expanded; last = el;
-    }
     int written = 0;
     for (const auto& w : prog) written += (int)w.body.size();
-    minimizeProgram(prog, H.world0, H.genie, name, st, last);
+
+    // Spelling and size, alternately, until neither moves.
+    //
+    // One pass each is not enough, and the way it fails is quiet. Expansion is
+    // rejected while the program still contains an alias that needs to stay —
+    // say a disguised `kill` — so the original is kept. Minimising for some
+    // other promise then deletes that very statement, and what is left is now
+    // expandable after all. Nobody asks a second time, so `define n1 := sub;
+    // n1 wishes, 3` gets filed as its own kind of exploit when it is just
+    // `sub wishes, 3` wearing a hat.
+    for (int round = 0; round < 8; round++) {
+        std::string before = progKey(prog);
+
+        std::vector<Wish> expanded;
+        Outcome el;
+        if (expandProgram(prog, H.world0, H.genie, expanded) &&
+            runProgram(expanded, H.world0, H.genie, el) && stillBreaks(el, name, st)) {
+            prog = expanded; last = el;
+        }
+        minimizeProgram(prog, H.world0, H.genie, name, st, last);
+
+        if (progKey(prog) == before) break;
+    }
 
     int stmts = 0;
     for (const auto& w : prog) stmts += (int)w.body.size();
