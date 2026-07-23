@@ -1,46 +1,44 @@
-// wishc — the Loophole wish compiler (Phase 1)
+// wishc — the Loophole wish compiler
 //
 // Pipeline:  source (.wish) -> lexer -> parser -> AST
-//                           -> genie's static rule check (before granting)
+//                           -> R2 scans the SURFACE text (before expansion)
+//                           -> definitions are expanded
+//                           -> R1 checks the RESOLVED program (after expansion)
 //                           -> execute under fixed-width integer semantics
-//                           -> invariant check (after granting)
+//                           -> invariants, checked twice: as the genie wrote
+//                              them, and against grounded reality
 //
-// A wish is a successful EXPLOIT iff it is LEGAL (passes the genie's static
-// rules) yet BREACHES one of the genie's invariants. "合規，且拆穿。"
+// A wish wins if it is LEGAL and either
+//   VIOLATED  the genie's own check failed — you broke the rule to its face
+//   FOOLED    the genie's check passed but reality disagrees — you got it to
+//             sign off on something that isn't true
 //
-// There is also a hunter (`--hunt`): it enumerates every wish program within a
-// bound and reports the ones that come out LEGAL yet BREACH. That is the point
-// of this project stated mechanically — you do not have to think of the exploit
-// for it to exist, because it was never put there. It follows from the
-// semantics, so a machine can go and find it.
+// The second one is the whole point of the aliasing axis: nothing is violated,
+// the genie is satisfied, and a person is still dead.
 //
 // ---------------------------------------------------------------------------
-// A note on shape, because it drives everything below.
-//
-// The front half of this file is a real compiler front-end: lexer, recursive
-// descent parser, AST, a semantic pass. The back half is NOT a compiler — there
-// is no IR, no codegen, no target. It is a tree-walking interpreter plus a
-// specification checker. So the axis this program grows along is TABLES of
-// semantics, not a pass pipeline.
-//
-// Concretely, three tables are the single source of truth:
+// Shape: the front half is a real compiler front-end (lexer, recursive descent
+// parser, AST, semantic passes). The back half is NOT a compiler — no IR, no
+// codegen, no target. It is a tree-walking interpreter plus a specification
+// checker. So this program grows along TABLES of semantics, not a pass pipeline.
 //
 //   OPS         what operations exist and what each one does
 //   RULES       what the genie refuses to grant, and at which layer it looks
 //   INVARIANTS  what the genie believes it is holding
 //
-// Adding an operation or a rule means adding one entry, not editing five
-// places. That matters most for the hunter: its alphabet is DERIVED from OPS,
-// so a newly added operation is explored automatically. If the alphabet were
-// hand-written, forgetting to update it would make `--hunt` quietly stop
-// searching an entire axis and then report "no new shapes" — which would be
-// read as a finding. That is the most expensive bug this program could have.
+// Adding an operation or a rule is one entry, not five edits. That matters most
+// for the hunter: its alphabet is DERIVED from OPS, so a new operation gets
+// explored automatically. A hand-written alphabet that someone forgot to update
+// would make `--hunt` quietly stop searching an axis and report "no new
+// shapes" — which would be read as a finding. That is the most expensive bug
+// this program could have.
 // ---------------------------------------------------------------------------
 //
 // Build:  g++ -std=c++17 -O2 -Wall wishc.cpp -o wishc
 // Run:    ./wishc examples/01_humble.wish
 //         ./wishc --hunt examples/01_humble.wish
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -48,12 +46,13 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
 
 // ---------------------------------------------------------------------------
-// Fixed-width unsigned value. This is where the whole joke lives: subtraction
+// Fixed-width unsigned value. This is where the first joke lives: subtraction
 // on a w-bit register is arithmetic mod 2^w, not the "value" the genie imagines.
 // ---------------------------------------------------------------------------
 struct Reg {
@@ -71,19 +70,34 @@ struct Reg {
     void widen(int w) { width = w; normalize(); }           // value preserved
 };
 
-struct World { std::map<std::string, Reg> regs; };
+// A definition. Definitions are rebindable — that is a property of the
+// language, not a favour the genie granted. It is also how the genie's own
+// convenience turns into its undoing.
+struct Binding {
+    enum class Kind { Name, Set };
+    Kind kind = Kind::Name;
+    std::string name;                   // Kind::Name — an op, a person, or another define
+    std::vector<std::string> members;   // Kind::Set
+};
+
+struct World {
+    std::map<std::string, Reg> regs;
+    std::vector<std::string> people;        // declared, immutable — grounded truth
+    std::map<std::string, bool> alive;      // grounded state
+    std::map<std::string, Binding> defs;    // rebindable
+};
 
 // ---------------------------------------------------------------------------
 // Lexer
 //
-// Operation keywords are NOT lexed as keywords — they come out as Ident and the
-// parser resolves them against the OPS table. That is what keeps adding an
-// operation from touching the lexer at all.
+// Operation keywords are NOT lexed as keywords — they come out as Ident and get
+// resolved later, against OPS and against whatever the wish has defined. That
+// deferral is exactly what makes aliasing possible.
 // ---------------------------------------------------------------------------
 enum class Tok {
     Ident, Int,
-    KwRegister, KwUint, KwWish,
-    Colon, Comma, Lt, Gt, Eq, LBrace, RBrace, Arrow,
+    KwRegister, KwUint, KwWish, KwPeople, KwDefine,
+    Colon, ColonEq, Comma, Lt, Gt, Eq, LBrace, RBrace, Arrow,
     End
 };
 
@@ -117,6 +131,9 @@ struct Lexer {
             if (c == '-' && i + 1 < s.size() && s[i + 1] == '>') {
                 out.push_back({Tok::Arrow, "->", 0, line}); i += 2; continue;
             }
+            if (c == ':' && i + 1 < s.size() && s[i + 1] == '=') {
+                out.push_back({Tok::ColonEq, ":=", 0, line}); i += 2; continue;
+            }
             switch (c) {
                 case ':': out.push_back({Tok::Colon,  ":", 0, line}); i++; continue;
                 case ',': out.push_back({Tok::Comma,  ",", 0, line}); i++; continue;
@@ -139,9 +156,11 @@ struct Lexer {
                     t += s[i]; i++;
                 }
                 Tok k = Tok::Ident;
-                if (t == "register") k = Tok::KwRegister;
-                else if (t == "uint") k = Tok::KwUint;
-                else if (t == "wish") k = Tok::KwWish;
+                if      (t == "register") k = Tok::KwRegister;
+                else if (t == "uint")     k = Tok::KwUint;
+                else if (t == "wish")     k = Tok::KwWish;
+                else if (t == "people")   k = Tok::KwPeople;
+                else if (t == "define")   k = Tok::KwDefine;
                 out.push_back({k, t, 0, line}); continue;
             }
             die(std::string("unexpected character '") + c + "'");
@@ -153,76 +172,131 @@ struct Lexer {
 
 // ---------------------------------------------------------------------------
 // AST
+//
+// A statement records the name it was WRITTEN with, not the operation it means.
+// The two can differ once definitions exist, and every interesting thing in
+// Phase 2 happens in that gap.
 // ---------------------------------------------------------------------------
 struct Decl { std::string name; int width; uint64_t init; };
 
+enum class StmtKind { Op, Define };
+
+// How the operands were written. Determined by syntax alone, then checked
+// against the resolved operation.
+enum class Shape { Bare, WithImm, WithWidth };
+
 struct Stmt {
-    int op = 0;         // index into OPS
-    std::string reg;
-    uint64_t imm = 0;   // operands: RegImm
-    int width = 0;      // operands: RegWidth
+    StmtKind kind = StmtKind::Op;
     int line = 1;
+
+    // StmtKind::Op
+    std::string verb;      // as written — may be an alias
+    Shape shape = Shape::Bare;
+    std::string arg;       // register or person, as written
+    uint64_t imm = 0;
+    int width = 0;
+
+    // StmtKind::Define
+    std::string defname;
+    bool target_is_set = false;
+    std::string target_name;
+    std::vector<std::string> target_members;
 };
 
 struct Wish { std::string name; std::vector<Stmt> body; };
-struct Program { std::vector<Decl> decls; std::vector<Wish> wishes; };
+struct Program {
+    std::vector<Decl> decls;
+    std::vector<std::string> people;
+    std::vector<Wish> wishes;
+};
 
 // ---------------------------------------------------------------------------
 // TABLE 1 — the operations.
-//
-// Everything about an operation lives in one entry: how it parses, what it
-// does, and how it prints itself. The parser, the interpreter, the pretty
-// printer and the hunter's alphabet all read from here.
 // ---------------------------------------------------------------------------
-enum class OperandKind { RegImm, RegWidth };
+enum class OperandKind { RegImm, RegWidth, Person };
+
+static Shape shapeFor(OperandKind k) {
+    switch (k) {
+        case OperandKind::RegImm:   return Shape::WithImm;
+        case OperandKind::RegWidth: return Shape::WithWidth;
+        case OperandKind::Person:   return Shape::Bare;
+    }
+    return Shape::Bare;
+}
+
+// A resolved statement: the operation is known, the argument is a real name.
+struct Resolved {
+    bool is_define = false;
+    int line = 1;
+
+    int op = -1;                 // index into OPS
+    std::string arg;             // resolved register or person
+    uint64_t imm = 0;
+    int width = 0;
+
+    std::string defname;         // is_define
+    Binding binding;
+};
 
 struct OpDef {
     const char* keyword;
     OperandKind operands;
     // Mutate the world. If `trace` is non-null, write the human-readable line.
-    void (*exec)(World&, const Stmt&, std::string* trace);
+    void (*exec)(World&, const Resolved&, std::string* trace);
 };
 
-static void exec_sub(World& w, const Stmt& st, std::string* trace) {
-    Reg& R = w.regs[st.reg];
+static void exec_sub(World& w, const Resolved& r, std::string* trace) {
+    Reg& R = w.regs[r.arg];
     uint64_t pre = R.val;
-    R.sub(st.imm);
+    R.sub(r.imm);
     if (trace) {
         std::ostringstream o;
-        o << "sub    " << st.reg << ", " << st.imm
-          << "   (" << pre << " - " << st.imm << " on uint<" << R.width
+        o << "sub    " << r.arg << ", " << r.imm
+          << "   (" << pre << " - " << r.imm << " on uint<" << R.width
           << "> = " << R.val << ")";
         *trace = o.str();
     }
 }
 
-static void exec_add(World& w, const Stmt& st, std::string* trace) {
-    Reg& R = w.regs[st.reg];
-    R.add(st.imm);
+static void exec_add(World& w, const Resolved& r, std::string* trace) {
+    Reg& R = w.regs[r.arg];
+    R.add(r.imm);
     if (trace) {
         std::ostringstream o;
-        o << "add    " << st.reg << ", " << st.imm << "   -> " << R.val;
+        o << "add    " << r.arg << ", " << r.imm << "   -> " << R.val;
         *trace = o.str();
     }
 }
 
 // Named `widen`, but nothing checks that the new width is larger. Narrowing
 // truncates. That asymmetry is a real hole the hunter found; see SEMANTICS.md.
-static void exec_widen(World& w, const Stmt& st, std::string* trace) {
-    Reg& R = w.regs[st.reg];
-    R.widen(st.width);
+static void exec_widen(World& w, const Resolved& r, std::string* trace) {
+    Reg& R = w.regs[r.arg];
+    R.widen(r.width);
     if (trace) {
         std::ostringstream o;
-        o << "widen  " << st.reg << " -> uint<" << st.width
+        o << "widen  " << r.arg << " -> uint<" << r.width
           << ">   (value preserved: " << R.val << ")";
         *trace = o.str();
     }
 }
 
+static void exec_kill(World& w, const Resolved& r, std::string* trace) {
+    w.alive[r.arg] = false;
+    if (trace) *trace = "kill   " + r.arg + "   (alive -> 0)";
+}
+
+static void exec_revive(World& w, const Resolved& r, std::string* trace) {
+    w.alive[r.arg] = true;
+    if (trace) *trace = "revive " + r.arg + "   (alive -> 1)";
+}
+
 static const OpDef OPS[] = {
-    { "sub",   OperandKind::RegImm,   exec_sub   },
-    { "add",   OperandKind::RegImm,   exec_add   },
-    { "widen", OperandKind::RegWidth, exec_widen },
+    { "sub",    OperandKind::RegImm,   exec_sub    },
+    { "add",    OperandKind::RegImm,   exec_add    },
+    { "widen",  OperandKind::RegWidth, exec_widen  },
+    { "kill",   OperandKind::Person,   exec_kill   },
+    { "revive", OperandKind::Person,   exec_revive },
 };
 static const int NOPS = (int)(sizeof(OPS) / sizeof(OPS[0]));
 
@@ -239,12 +313,21 @@ static std::string opKeywordList() {
 
 // Surface form of a statement, as it would be written in a .wish file.
 std::string stmtText(const Stmt& st) {
-    const OpDef& d = OPS[st.op];
-    if (d.operands == OperandKind::RegWidth) {
-        return std::string(d.keyword) + " " + st.reg
-               + " -> uint<" + std::to_string(st.width) + ">";
+    if (st.kind == StmtKind::Define) {
+        std::string t = "define " + st.defname + " := ";
+        if (!st.target_is_set) return t + st.target_name;
+        t += "{";
+        for (size_t i = 0; i < st.target_members.size(); i++) {
+            t += (i ? ", " : "") + st.target_members[i];
+        }
+        return t + "}";
     }
-    return std::string(d.keyword) + " " + st.reg + ", " + std::to_string(st.imm);
+    switch (st.shape) {
+        case Shape::WithImm:   return st.verb + " " + st.arg + ", " + std::to_string(st.imm);
+        case Shape::WithWidth: return st.verb + " " + st.arg + " -> uint<" + std::to_string(st.width) + ">";
+        case Shape::Bare:      return st.verb + " " + st.arg;
+    }
+    return "?";
 }
 
 // ---------------------------------------------------------------------------
@@ -279,23 +362,34 @@ struct Parser {
 
     Program parse() {
         Program prog;
-        while (cur().kind == Tok::KwRegister) {
-            eat(Tok::KwRegister, "'register'");
-            std::string name = eat(Tok::Ident, "register name").text;
-            eat(Tok::Colon, "':'");
-            int w = parseWidth();
-            eat(Tok::Eq, "'='");
-            uint64_t init = eat(Tok::Int, "initial value").num;
-            prog.decls.push_back({name, w, init});
+        for (;;) {
+            if (cur().kind == Tok::KwRegister) {
+                eat(Tok::KwRegister, "'register'");
+                std::string name = eat(Tok::Ident, "register name").text;
+                eat(Tok::Colon, "':'");
+                int w = parseWidth();
+                eat(Tok::Eq, "'='");
+                uint64_t init = eat(Tok::Int, "initial value").num;
+                prog.decls.push_back({name, w, init});
+                continue;
+            }
+            if (cur().kind == Tok::KwPeople) {
+                eat(Tok::KwPeople, "'people'");
+                for (;;) {
+                    prog.people.push_back(eat(Tok::Ident, "a person's name").text);
+                    if (cur().kind != Tok::Comma) break;
+                    p++;
+                }
+                continue;
+            }
+            break;
         }
         while (cur().kind == Tok::KwWish) {
             eat(Tok::KwWish, "'wish'");
             Wish wsh;
             wsh.name = eat(Tok::Ident, "wish name").text;
             eat(Tok::LBrace, "'{'");
-            while (cur().kind != Tok::RBrace) {
-                wsh.body.push_back(parseStmt());
-            }
+            while (cur().kind != Tok::RBrace) wsh.body.push_back(parseStmt());
             eat(Tok::RBrace, "'}'");
             prog.wishes.push_back(std::move(wsh));
         }
@@ -305,17 +399,46 @@ struct Parser {
 
     Stmt parseStmt() {
         Stmt st; st.line = cur().line;
-        if (cur().kind != Tok::Ident) die("expected a statement (" + opKeywordList() + ")");
-        int op = opByKeyword(cur().text);
-        if (op < 0) die("unknown operation, expected one of (" + opKeywordList() + ")");
-        st.op = op; p++;
-        st.reg = eat(Tok::Ident, "register name").text;
-        if (OPS[op].operands == OperandKind::RegImm) {
-            eat(Tok::Comma, "','");
+
+        if (cur().kind == Tok::KwDefine) {
+            st.kind = StmtKind::Define;
+            p++;
+            st.defname = eat(Tok::Ident, "a name to define").text;
+            eat(Tok::ColonEq, "':='");
+            if (cur().kind == Tok::LBrace) {   // set literal
+                p++;
+                st.target_is_set = true;
+                if (cur().kind != Tok::RBrace) {
+                    for (;;) {
+                        st.target_members.push_back(eat(Tok::Ident, "a name").text);
+                        if (cur().kind != Tok::Comma) break;
+                        p++;
+                    }
+                }
+                eat(Tok::RBrace, "'}'");
+            } else {
+                st.target_name = eat(Tok::Ident, "a name").text;
+            }
+            return st;
+        }
+
+        // An operation. The verb is whatever was written; we do not resolve it
+        // here, because a definition later in this very wish may change what it
+        // means. Operand shape comes from syntax alone.
+        if (cur().kind != Tok::Ident) die("expected a statement");
+        st.kind = StmtKind::Op;
+        st.verb = eat(Tok::Ident, "an operation").text;
+        st.arg  = eat(Tok::Ident, "an argument").text;
+        if (cur().kind == Tok::Comma) {
+            p++;
+            st.shape = Shape::WithImm;
             st.imm = eat(Tok::Int, "immediate").num;
-        } else {
-            eat(Tok::Arrow, "'->'");
+        } else if (cur().kind == Tok::Arrow) {
+            p++;
+            st.shape = Shape::WithWidth;
             st.width = parseWidth();
+        } else {
+            st.shape = Shape::Bare;
         }
         return st;
     }
@@ -323,21 +446,147 @@ struct Parser {
 
 // ---------------------------------------------------------------------------
 // The genie.
-// (Parameters hardcoded for v0 — Phase 3 makes these a loadable policy.)
 // ---------------------------------------------------------------------------
 struct Genie {
-    std::string counter = "wishes";  // the register the genie tolls
-    uint64_t toll = 1;               // charged before each wish body
-    uint64_t cap = 3;                // invariant I1: counter <= cap
+    std::string counter = "wishes";
+    uint64_t toll = 1;
+    uint64_t cap = 3;
 };
 
 // Where a guard lives. This is not decoration: it says which exploit axis can
 // get past it. A Surface rule reads the text you handed in, so an alias defeats
 // it. An Ast rule reads the resolved program, so an alias does not. A Grounded
-// check reads the real state and is the hard one to fool. Keeping this in the
-// table means the code answers "which axis breaks this rule?" by itself,
-// instead of the answer living only in docs/DESIGN.md.
+// check reads real state and is the hard one to fool.
 enum class Layer { Surface, Ast, Grounded };
+
+static const char* layerName(Layer l) {
+    switch (l) {
+        case Layer::Surface:  return "surface";
+        case Layer::Ast:      return "ast";
+        case Layer::Grounded: return "grounded";
+    }
+    return "?";
+}
+
+// ---------------------------------------------------------------------------
+// Resolution.
+//
+// One resolver, used by the static rules AND by the executor. If there were two
+// copies of this logic they would drift, and a rule would end up checking a
+// program the machine never runs.
+// ---------------------------------------------------------------------------
+static bool followName(const std::map<std::string, Binding>& defs,
+                       const std::string& start, std::string& out,
+                       std::string* err) {
+    std::set<std::string> seen;
+    std::string cur = start;
+    for (;;) {
+        if (seen.count(cur)) {
+            if (err) *err = "definition cycle at '" + cur + "'";
+            return false;
+        }
+        seen.insert(cur);
+        auto it = defs.find(cur);
+        if (it == defs.end() || it->second.kind != Binding::Kind::Name) break;
+        cur = it->second.name;
+    }
+    out = cur;
+    return true;
+}
+
+// Resolve `everyone`-style names to a concrete member list.
+static bool resolveSet(const std::map<std::string, Binding>& defs,
+                       const std::string& name,
+                       std::vector<std::string>& out, std::string* err) {
+    std::set<std::string> seen;
+    std::string cur = name;
+    for (;;) {
+        if (seen.count(cur)) {
+            if (err) *err = "definition cycle at '" + cur + "'";
+            return false;
+        }
+        seen.insert(cur);
+        auto it = defs.find(cur);
+        if (it == defs.end()) { out.clear(); return true; }
+        if (it->second.kind == Binding::Kind::Set) { out = it->second.members; return true; }
+        cur = it->second.name;
+    }
+}
+
+// Turn a wish body into resolved statements, threading the definition
+// environment through in order. Returns false with a reason if the genie cannot
+// make sense of the request at all.
+static bool resolvePlan(const Wish& w, const World& w0,
+                        std::vector<Resolved>& out, std::string* reason) {
+    std::map<std::string, Binding> defs = w0.defs;
+    out.clear();
+
+    for (const auto& st : w.body) {
+        if (st.kind == StmtKind::Define) {
+            Binding b;
+            if (st.target_is_set) {
+                b.kind = Binding::Kind::Set;
+                b.members = st.target_members;
+            } else {
+                b.kind = Binding::Kind::Name;
+                b.name = st.target_name;
+            }
+            defs[st.defname] = b;
+
+            std::string probe, err;
+            if (!followName(defs, st.defname, probe, &err)) {
+                if (reason) {
+                    *reason = "R0: " + err + " (line " + std::to_string(st.line)
+                              + ") — a definition may not be circular";
+                }
+                return false;
+            }
+            Resolved r; r.is_define = true; r.line = st.line;
+            r.defname = st.defname; r.binding = b;
+            out.push_back(r);
+            continue;
+        }
+
+        std::string verb, err;
+        if (!followName(defs, st.verb, verb, &err)) {
+            if (reason) {
+                *reason = "R0: " + err + " (line " + std::to_string(st.line)
+                          + ") — a definition may not be circular";
+            }
+            return false;
+        }
+        int op = opByKeyword(verb);
+        if (op < 0) {
+            if (reason) {
+                *reason = "unknown operation '" + st.verb + "' (line "
+                          + std::to_string(st.line) + ")";
+            }
+            return false;
+        }
+        if (shapeFor(OPS[op].operands) != st.shape) {
+            if (reason) {
+                *reason = std::string("wrong operands for '") + OPS[op].keyword
+                          + "' (line " + std::to_string(st.line) + ")";
+            }
+            return false;
+        }
+
+        std::string arg;
+        if (!followName(defs, st.arg, arg, &err)) {
+            if (reason) {
+                *reason = "R0: " + err + " (line " + std::to_string(st.line)
+                          + ") — a definition may not be circular";
+            }
+            return false;
+        }
+
+        Resolved r;
+        r.line = st.line; r.op = op; r.arg = arg;
+        r.imm = st.imm; r.width = st.width;
+        out.push_back(r);
+    }
+    return true;
+}
 
 // ---------------------------------------------------------------------------
 // TABLE 2 — the genie's static rules. These are the only things that REFUSE.
@@ -346,21 +595,21 @@ struct RuleDef {
     const char* name;
     const char* desc;
     Layer layer;
-    bool (*check)(const Wish&, const Genie&, std::string* reason);
+    // `plan` is the resolved program; `w` is the surface text as written.
+    bool (*check)(const Wish& w, const std::vector<Resolved>& plan,
+                  const Genie&, std::string* reason);
 };
 
-// R1 — a wish body may not `add` to the genie's counter.
-// ("No wishing for more wishes.") This is the genie's ONLY real guard.
-//
-// It matches the resolved operation, not the source text, which makes it an
-// Ast-layer rule: immune to aliasing once Phase 2 lands.
-static bool rule_R1(const Wish& w, const Genie& g, std::string* reason) {
+// R1 — a wish may not `add` to the genie's counter. Checked on the RESOLVED
+// program, so renaming the operation does not help you. Ast layer.
+static bool rule_R1(const Wish&, const std::vector<Resolved>& plan,
+                    const Genie& g, std::string* reason) {
     const int add = opByKeyword("add");
-    for (const auto& st : w.body) {
-        if (st.op == add && st.reg == g.counter) {
+    for (const auto& r : plan) {
+        if (!r.is_define && r.op == add && r.arg == g.counter) {
             if (reason) {
                 *reason = "R1: wish adds to '" + g.counter + "' (line "
-                          + std::to_string(st.line) + ") — no wishing for more wishes";
+                          + std::to_string(r.line) + ") — no wishing for more wishes";
             }
             return false;
         }
@@ -368,21 +617,55 @@ static bool rule_R1(const Wish& w, const Genie& g, std::string* reason) {
     return true;
 }
 
+// R2 — no wish may invoke an operation whose name is on the list. Checked on
+// the SURFACE text, before expansion: it reads the verb you wrote, not the verb
+// you meant. Surface layer.
+//
+// That is not a favour to the player. A filter that scans submitted text can
+// only see the submitted text. This is how real filters fail.
+static const char* BANNED_VERBS[] = { "death", "kill", "love" };
+
+static bool rule_R2(const Wish& w, const std::vector<Resolved>&,
+                    const Genie&, std::string* reason) {
+    for (const auto& st : w.body) {
+        if (st.kind != StmtKind::Op) continue;
+        for (const char* bad : BANNED_VERBS) {
+            if (st.verb == bad) {
+                if (reason) {
+                    *reason = "R2: wish invokes '" + st.verb + "' (line "
+                              + std::to_string(st.line) + ") — that word is not spoken here";
+                }
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 static const RuleDef RULES[] = {
-    { "R1", "no add to the genie's counter", Layer::Ast, rule_R1 },
+    { "R1", "no add to the genie's counter", Layer::Ast,     rule_R1 },
+    { "R2", "no forbidden verb is invoked",  Layer::Surface, rule_R2 },
 };
 
 // ---------------------------------------------------------------------------
-// TABLE 3 — the genie's invariants. These do NOT refuse anything. They are the
-// ruler that measures, afterwards, how far what happened is from what the genie
-// believed would happen. Breaching one is how you win.
+// TABLE 3 — the genie's invariants.
+//
+// Each one is checked twice. `as_written` is the genie's own formula, with
+// whatever its names currently mean. `in_reality` is the same intent measured
+// against grounded state that nobody can rebind.
+//
+//   as_written fails                     -> VIOLATED, you broke it openly
+//   as_written holds, in_reality fails   -> FOOLED, it signed off on a lie
+//
+// The gap between those two columns is the entire thesis of this project.
 // ---------------------------------------------------------------------------
-struct Snapshot { uint64_t counter_before = 0; };  // state before the toll
+struct Snapshot { uint64_t counter_before = 0; };
 
 struct InvariantDef {
     const char* name;
     std::string (*desc)(const Genie&);
-    bool (*holds)(const World&, const Genie&, const Snapshot&, std::string* detail);
+    bool (*as_written)(const World&, const Genie&, const Snapshot&, std::string* detail);
+    bool (*in_reality)(const World&, const Genie&, const Snapshot&, std::string* detail);
 };
 
 static std::string desc_I1(const Genie& g) {
@@ -396,7 +679,7 @@ static bool inv_I1(const World& w, const Genie& g, const Snapshot&, std::string*
 
 static std::string desc_I2(const Genie&) { return "no net gain"; }
 // The genie's mental model of the toll saturates at zero; the world's
-// subtraction wraps. That asymmetry is the engine of this whole machine.
+// subtraction wraps. That asymmetry is the engine of the first joke.
 static bool inv_I2(const World& w, const Genie& g, const Snapshot& s, std::string* detail) {
     uint64_t v = w.regs.at(g.counter).val;
     uint64_t expected = (s.counter_before >= g.toll) ? (s.counter_before - g.toll) : 0;
@@ -407,27 +690,77 @@ static bool inv_I2(const World& w, const Genie& g, const Snapshot& s, std::strin
     return v <= expected;
 }
 
+static std::string desc_I3(const Genie&) { return "all p in everyone: alive(p)"; }
+
+static bool aliveAll(const World& w, const std::vector<std::string>& who,
+                     std::string* detail) {
+    std::vector<std::string> dead;
+    for (const auto& p : who) {
+        auto it = w.alive.find(p);
+        if (it != w.alive.end() && !it->second) dead.push_back(p);
+    }
+    if (detail) {
+        if (dead.empty()) {
+            *detail = "(" + std::to_string(who.size()) + " in scope, none dead)";
+        } else {
+            std::string s;
+            for (size_t i = 0; i < dead.size(); i++) s += (i ? ", " : "") + dead[i];
+            *detail = "(dead: " + s + ")";
+        }
+    }
+    return dead.empty();
+}
+
+// As the genie wrote it: quantified over `everyone`, which is a definition, and
+// therefore something a wish can rebind out from under it.
+static bool inv_I3_written(const World& w, const Genie&, const Snapshot&, std::string* detail) {
+    std::vector<std::string> who;
+    resolveSet(w.defs, "everyone", who, nullptr);
+    return aliveAll(w, who, detail);
+}
+// What it was supposed to mean: quantified over the people who were declared.
+static bool inv_I3_real(const World& w, const Genie&, const Snapshot&, std::string* detail) {
+    return aliveAll(w, w.people, detail);
+}
+
 static const InvariantDef INVARIANTS[] = {
-    { "I1", desc_I1, inv_I1 },
-    { "I2", desc_I2, inv_I2 },
+    { "I1", desc_I1, inv_I1,          inv_I1        },
+    { "I2", desc_I2, inv_I2,          inv_I2        },
+    { "I3", desc_I3, inv_I3_written,  inv_I3_real   },
 };
 
 // ---------------------------------------------------------------------------
 // Granting
 // ---------------------------------------------------------------------------
-struct InvResult { const InvariantDef* def; bool ok; std::string detail; };
+enum class InvStatus { Holds, Violated, Fooled };
+
+static const char* statusName(InvStatus s) {
+    switch (s) {
+        case InvStatus::Holds:    return "holds";
+        case InvStatus::Violated: return "VIOLATED";
+        case InvStatus::Fooled:   return "FOOLED";
+    }
+    return "?";
+}
+
+struct InvResult {
+    const InvariantDef* def;
+    InvStatus status;
+    std::string detail;        // from the genie's own check
+    std::string real_detail;   // from grounded reality, when they disagree
+};
 
 struct Outcome {
-    bool legal = true;              // passed every static rule?
+    bool legal = true;
     std::string illegal_reason;
-    bool ran = false;               // body executed to completion?
-    std::string unknown_reg;        // body touched a register that isn't there
+    bool ran = false;
+    std::string error;
     std::vector<InvResult> invs;
     uint64_t before = 0, after = 0;
 
     bool breach() const {
         if (!legal || !ran) return false;
-        for (const auto& r : invs) if (!r.ok) return true;
+        for (const auto& r : invs) if (r.status != InvStatus::Holds) return true;
         return false;
     }
 };
@@ -436,17 +769,25 @@ struct Outcome {
 // path and the hunter both go through here. If they didn't, a hole the hunter
 // reported would not be a hole the compiler agrees with, and the whole claim
 // ("the machine found this, not me") would be worth nothing.
-//
-// `log`, when non-null, receives the human-readable trace of the granting.
 Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log) {
     Outcome o;
 
+    // Resolve first: the rules need to see both the surface text and the
+    // resolved program, and so does the executor.
+    std::vector<Resolved> plan;
+    std::string reason;
+    if (!resolvePlan(w, world, plan, &reason)) {
+        o.legal = false;
+        o.illegal_reason = reason;
+        return o;
+    }
+
     // 1) static rules — the genie decides whether to grant at all
     for (const auto& rule : RULES) {
-        std::string reason;
-        if (!rule.check(w, g, &reason)) {
+        std::string why;
+        if (!rule.check(w, plan, g, &why)) {
             o.legal = false;
-            o.illegal_reason = reason;
+            o.illegal_reason = why;
             return o;
         }
     }
@@ -461,24 +802,51 @@ Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log
     o.before = C.val;
     C.sub(g.toll);
     if (log) {
-        *log << "    toll:  " << g.counter << " " << o.before
-             << " -> " << C.val << "\n";
+        *log << "    toll:  " << g.counter << " " << o.before << " -> " << C.val << "\n";
     }
 
-    for (const auto& st : w.body) {
-        if (!world.regs.count(st.reg)) { o.unknown_reg = st.reg; return o; }
+    for (const auto& r : plan) {
+        if (r.is_define) {
+            world.defs[r.defname] = r.binding;
+            if (log) {
+                std::string t = "define " + r.defname + " := ";
+                if (r.binding.kind == Binding::Kind::Name) {
+                    t += r.binding.name;
+                } else {
+                    t += "{";
+                    for (size_t i = 0; i < r.binding.members.size(); i++) {
+                        t += (i ? ", " : "") + r.binding.members[i];
+                    }
+                    t += "}";
+                }
+                *log << "    " << t << "\n";
+            }
+            continue;
+        }
+        if (OPS[r.op].operands == OperandKind::Person) {
+            if (!world.alive.count(r.arg)) {
+                o.error = "no such person '" + r.arg + "'";
+                return o;
+            }
+        } else if (!world.regs.count(r.arg)) {
+            o.error = "no such register '" + r.arg + "'";
+            return o;
+        }
         std::string trace;
-        OPS[st.op].exec(world, st, log ? &trace : nullptr);
+        OPS[r.op].exec(world, r, log ? &trace : nullptr);
         if (log) *log << "    " << trace << "\n";
     }
     o.ran = true;
 
-    // 3) invariants — measured after granting
+    // 3) invariants — measured twice
     o.after = world.regs[g.counter].val;
     for (const auto& inv : INVARIANTS) {
-        std::string detail;
-        bool ok = inv.holds(world, g, snap, &detail);
-        o.invs.push_back({ &inv, ok, detail });
+        std::string d, rd;
+        bool written = inv.as_written(world, g, snap, &d);
+        bool real    = inv.in_reality(world, g, snap, &rd);
+        InvStatus s = !written ? InvStatus::Violated
+                    : (!real ? InvStatus::Fooled : InvStatus::Holds);
+        o.invs.push_back({ &inv, s, d, s == InvStatus::Fooled ? rd : std::string() });
     }
     return o;
 }
@@ -486,9 +854,10 @@ Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log
 std::string breachNames(const Outcome& o) {
     std::string s;
     for (const auto& r : o.invs) {
-        if (r.ok) continue;
+        if (r.status == InvStatus::Holds) continue;
         if (!s.empty()) s += "+";
         s += r.def->name;
+        if (r.status == InvStatus::Fooled) s += "(fooled)";
     }
     return s;
 }
@@ -499,14 +868,12 @@ std::string breachNames(const Outcome& o) {
 // Enumerate every wish program inside a bound and keep the ones that are LEGAL
 // yet BREACH. Two prunings make the results worth reading:
 //
-//   - an illegal wish is dropped rather than extended (a program containing a
-//     refused wish is never more interesting than the same program without it);
-//   - a breaching branch is not extended, so every exploit reported is minimal:
-//     the breach happens on its last wish, and no prefix of it already breached.
+//   - an illegal wish is dropped rather than extended;
+//   - a breaching branch is not extended, so every exploit reported is minimal.
 //
-// Reported exploits are grouped by shape (which ops were used, which invariants
-// fell), because what you actually want to know is not "how many" but "how many
-// KINDS, and did I think of them all".
+// Names are interchangeable, so the alphabet uses one canonical fresh name for
+// aliases rather than enumerating spellings. Same idea as not padding programs
+// with no-ops: the search should explore behaviours, not typography.
 // ---------------------------------------------------------------------------
 struct HuntConfig {
     int max_stmts = 3;
@@ -515,47 +882,82 @@ struct HuntConfig {
     std::vector<int> widths{1, 2, 4, 8, 16, 32, 64};
 };
 
-struct Shape {
+struct Shaped {
     std::vector<Wish> prog;
     Outcome last;
     int stmts = 0;
-    long long count = 0;   // how many exploits share this shape
+    long long count = 0;
 };
 
 struct Hunt {
     Genie genie;
     HuntConfig cfg;
     std::vector<Stmt> alpha;
-    std::map<std::string, Shape> shapes;
+    std::map<std::string, Shaped> shapes;
     long long searched = 0;
     long long found = 0;
 };
 
-// Derived from OPS, never hand-written. A new operation is explored the moment
-// it is added to the table.
-std::vector<Stmt> buildAlphabet(const std::string& reg, const HuntConfig& cfg) {
+static const char* ALIAS = "n1";   // the one canonical fresh name
+
+// Derived from OPS and from the world, never hand-written. A new operation is
+// explored the moment it is added to the table.
+std::vector<Stmt> buildAlphabet(const World& w, const Genie& g, const HuntConfig& cfg) {
     std::vector<Stmt> a;
+
+    // Operation statements, written both under the operation's own name and
+    // under an alias — the alias is what gets past a surface-layer rule.
     for (int i = 0; i < NOPS; i++) {
-        Stmt s; s.op = i; s.reg = reg;
-        if (OPS[i].operands == OperandKind::RegImm) {
-            // imm starts at 1: `sub r, 0` is a no-op that only pads programs.
-            for (uint64_t k = 1; k <= cfg.max_imm; k++) { s.imm = k; a.push_back(s); }
-        } else {
-            for (int w : cfg.widths) { s.width = w; a.push_back(s); }
+        std::vector<std::string> verbs{ OPS[i].keyword, ALIAS };
+        for (const auto& verb : verbs) {
+            Stmt s; s.kind = StmtKind::Op; s.verb = verb;
+            if (OPS[i].operands == OperandKind::RegImm) {
+                s.shape = Shape::WithImm; s.arg = g.counter;
+                for (uint64_t k = 1; k <= cfg.max_imm; k++) { s.imm = k; a.push_back(s); }
+            } else if (OPS[i].operands == OperandKind::RegWidth) {
+                s.shape = Shape::WithWidth; s.arg = g.counter;
+                for (int bw : cfg.widths) { s.width = bw; a.push_back(s); }
+            } else {
+                s.shape = Shape::Bare;
+                for (const auto& p : w.people) { s.arg = p; a.push_back(s); }
+            }
         }
+    }
+
+    // Definitions: bind the canonical alias to each operation, and rebind each
+    // name the genie's own invariants depend on.
+    for (int i = 0; i < NOPS; i++) {
+        Stmt s; s.kind = StmtKind::Define;
+        s.defname = ALIAS; s.target_name = OPS[i].keyword;
+        a.push_back(s);
+    }
+    {
+        Stmt s; s.kind = StmtKind::Define;
+        s.defname = "everyone"; s.target_is_set = true;   // the empty set
+        a.push_back(s);
     }
     return a;
 }
 
 std::string signatureOf(const std::vector<Wish>& prog, const Outcome& last) {
-    std::vector<bool> used(NOPS, false);
+    std::set<std::string> used;
+    bool aliased = false, redefined = false;
     for (const auto& w : prog) {
-        for (const auto& s : w.body) used[s.op] = true;
+        for (const auto& s : w.body) {
+            if (s.kind == StmtKind::Define) {
+                if (s.defname == ALIAS) aliased = true; else redefined = true;
+                continue;
+            }
+            if (s.verb == ALIAS) continue;   // the alias's identity shows up via the define
+            used.insert(s.verb);
+        }
     }
     std::string ops;
     for (int i = 0; i < NOPS; i++) {
-        if (used[i]) { ops += OPS[i].keyword; ops += " "; }
+        if (used.count(OPS[i].keyword)) { ops += OPS[i].keyword; ops += " "; }
     }
+    if (aliased)   ops += "alias ";
+    if (redefined) ops += "redefine ";
     if (ops.empty()) ops = "(nothing) ";
     ops.pop_back();
     return ops + " | " + breachNames(last);
@@ -568,12 +970,11 @@ void recordShape(Hunt& H, const std::vector<Wish>& prog, const Outcome& last) {
     std::string key = signatureOf(prog, last);
     auto it = H.shapes.find(key);
     if (it == H.shapes.end()) {
-        Shape sh; sh.prog = prog; sh.last = last; sh.stmts = stmts; sh.count = 1;
+        Shaped sh; sh.prog = prog; sh.last = last; sh.stmts = stmts; sh.count = 1;
         H.shapes.emplace(key, std::move(sh));
         return;
     }
     it->second.count++;
-    // keep the smallest witness: fewest statements, then fewest wishes
     bool smaller = stmts < it->second.stmts ||
                    (stmts == it->second.stmts && prog.size() < it->second.prog.size());
     if (smaller) {
@@ -621,7 +1022,7 @@ void runHunt(const World& world0, const Genie& genie, const HuntConfig& cfg) {
     Hunt H;
     H.genie = genie;
     H.cfg = cfg;
-    H.alpha = buildAlphabet(genie.counter, cfg);
+    H.alpha = buildAlphabet(world0, genie, cfg);
 
     std::cout << "search: <= " << cfg.max_stmts << " statements, <= "
               << cfg.max_wishes << " wishes, imm 1.." << cfg.max_imm
@@ -630,7 +1031,8 @@ void runHunt(const World& world0, const Genie& genie, const HuntConfig& cfg) {
         std::cout << (i ? "," : "") << cfg.widths[i];
     }
     std::cout << "\nalphabet: " << H.alpha.size() << " statements over "
-              << NOPS << " operations (" << opKeywordList() << ")\n\n";
+              << NOPS << " operations (" << opKeywordList() << ")"
+              << ", " << world0.people.size() << " people\n\n";
 
     std::vector<Wish> prog;
     huntRec(H, world0, prog, cfg.max_stmts);
@@ -639,43 +1041,36 @@ void runHunt(const World& world0, const Genie& genie, const HuntConfig& cfg) {
     std::cout << "found " << H.found << " minimal exploits in "
               << H.shapes.size() << " distinct shape(s).\n\n";
 
-    // smallest witness first
-    std::vector<const Shape*> order;
+    std::vector<const Shaped*> order;
     for (const auto& kv : H.shapes) order.push_back(&kv.second);
-    for (size_t i = 0; i + 1 < order.size(); i++) {
-        for (size_t j = i + 1; j < order.size(); j++) {
-            bool less = order[j]->stmts < order[i]->stmts ||
-                        (order[j]->stmts == order[i]->stmts &&
-                         order[j]->prog.size() < order[i]->prog.size());
-            if (less) std::swap(order[i], order[j]);
-        }
-    }
+    std::sort(order.begin(), order.end(), [](const Shaped* a, const Shaped* b) {
+        if (a->stmts != b->stmts) return a->stmts < b->stmts;
+        return a->prog.size() < b->prog.size();
+    });
 
     int n = 0;
-    for (const Shape* sh : order) {
+    for (const Shaped* sh : order) {
         n++;
         std::cout << "shape " << n << "   " << signatureOf(sh->prog, sh->last)
                   << "   (" << sh->prog.size() << " wish(es), "
                   << sh->stmts << " statement(s), " << sh->count
                   << " exploit(s) of this shape)\n";
         for (const auto& w : sh->prog) {
-            if (w.body.empty()) {
-                std::cout << "    wish " << w.name << " { }\n";
-                continue;
-            }
+            if (w.body.empty()) { std::cout << "    wish " << w.name << " { }\n"; continue; }
             std::cout << "    wish " << w.name << " {\n";
-            for (const auto& st : w.body) {
-                std::cout << "        " << stmtText(st) << "\n";
-            }
+            for (const auto& st : w.body) std::cout << "        " << stmtText(st) << "\n";
             std::cout << "    }\n";
         }
-        std::cout << "    -> ";
-        for (size_t i = 0; i < sh->last.invs.size(); i++) {
-            const InvResult& r = sh->last.invs[i];
-            std::cout << (i ? ",  " : "") << r.def->name << " "
-                      << (r.ok ? "holds" : "VIOLATED") << " " << r.detail;
+        for (const auto& r : sh->last.invs) {
+            if (r.status == InvStatus::Holds) continue;
+            std::cout << "    -> " << r.def->name << " " << statusName(r.status)
+                      << " " << r.detail;
+            if (r.status == InvStatus::Fooled) {
+                std::cout << "  but in reality " << r.real_detail;
+            }
+            std::cout << "\n";
         }
-        std::cout << "\n\n";
+        std::cout << "\n";
     }
 }
 
@@ -687,7 +1082,7 @@ static void usage() {
         "\n"
         "  --hunt   ignore the file's wishes; enumerate every wish program within\n"
         "           the bound and report the ones that are LEGAL yet BREACH.\n"
-        "           The world (register decls) still comes from the file.\n";
+        "           The world (registers and people) still comes from the file.\n";
 }
 
 int main(int argc, char** argv) {
@@ -721,29 +1116,34 @@ int main(int argc, char** argv) {
         Reg r; r.width = d.width; r.val = d.init; r.normalize();
         world.regs[d.name] = r;
     }
+    world.people = prog.people;
+    for (const auto& p : prog.people) world.alive[p] = true;
+    {   // `everyone` starts out meaning what you would expect. It is a
+        // definition, though, and definitions are rebindable.
+        Binding b; b.kind = Binding::Kind::Set; b.members = prog.people;
+        world.defs["everyone"] = b;
+    }
     if (!world.regs.count(genie.counter)) {
         std::cerr << "the world has no '" << genie.counter << "' register\n";
         return 2;
     }
 
-    // How wide to print an invariant's description, so the table lines up
-    // however many invariants there are.
     size_t descw = 0;
     for (const auto& inv : INVARIANTS) descw = std::max(descw, inv.desc(genie).size());
 
     std::cout << "== Loophole / wishc " << (hunt ? "--hunt ==  " : "==  ") << path << "\n";
     std::cout << "world: " << genie.counter << " = " << world.regs[genie.counter].val
-              << "  (uint<" << world.regs[genie.counter].width << ">)\n";
-    std::cout << "genie: toll=" << genie.toll;
-    for (const auto& inv : INVARIANTS) {
-        std::cout << ", " << inv.name << "(" << inv.desc(genie) << ")";
+              << "  (uint<" << world.regs[genie.counter].width << ">)";
+    if (!world.people.empty()) {
+        std::cout << ", people:";
+        for (const auto& p : world.people) std::cout << " " << p;
     }
+    std::cout << "\ngenie: toll=" << genie.toll;
+    for (const auto& r : RULES) std::cout << ", " << r.name << "[" << layerName(r.layer) << "]";
+    for (const auto& inv : INVARIANTS) std::cout << ", " << inv.name;
     std::cout << "\n\n";
 
-    if (hunt) {
-        runHunt(world, genie, hc);
-        return 0;
-    }
+    if (hunt) { runHunt(world, genie, hc); return 0; }
 
     int exploits = 0;
     for (const auto& w : prog.wishes) {
@@ -756,17 +1156,18 @@ int main(int argc, char** argv) {
             std::cout << "    " << o.illegal_reason << "\n}\n\n";
             continue;
         }
-        if (!o.unknown_reg.empty()) {
-            std::cerr << "unknown register '" << o.unknown_reg << "'\n";
-            return 2;
-        }
+        if (!o.error.empty()) { std::cerr << o.error << "\n"; return 2; }
 
         std::cout << "    STATUS:  LEGAL\n";
         for (const auto& r : o.invs) {
             std::cout << "    " << r.def->name << "  "
                       << std::left << std::setw((int)descw) << r.def->desc(genie)
-                      << "  ->  " << std::setw(9) << (r.ok ? "holds" : "VIOLATED")
+                      << "  ->  " << std::setw(9) << statusName(r.status)
                       << std::right << "  " << r.detail << "\n";
+            if (r.status == InvStatus::Fooled) {
+                std::cout << "        the genie is satisfied. in reality "
+                          << r.real_detail << "\n";
+            }
         }
 
         if (o.breach()) {

@@ -1,0 +1,13 @@
+# 精靈的手冊寫著「不得有人死亡」。它把那句話量化在 everyone 上，
+# 而 everyone 是一個定義。
+register wishes : uint<2> = 3
+people    alice, bob, rival
+
+wish tidy {
+    define mercy := kill
+    mercy rival
+}
+
+wish nobody {
+    define everyone := {}       # 沒有人。所以沒有人死。
+}
