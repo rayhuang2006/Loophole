@@ -11,11 +11,19 @@
 // Phase 1 scope: register decls, wish blocks, `sub`/`add`/`widen`.
 // Hand-rolled lexer + recursive-descent parser, no external libraries.
 //
+// There is also a hunter (`--hunt`): it enumerates every wish program within a
+// bound and reports the ones that come out LEGAL yet BREACH. That is the point
+// of this project stated mechanically — you do not have to think of the exploit
+// for it to exist, because it was never put there. It follows from the
+// semantics, so a machine can go and find it.
+//
 // Build:  g++ -std=c++17 -O2 -Wall wishc.cpp -o wishc
 // Run:    ./wishc examples/01_humble.wish
+//         ./wishc --hunt examples/01_humble.wish
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -136,6 +144,15 @@ struct Stmt {
 struct Wish { std::string name; std::vector<Stmt> body; };
 struct Program { std::vector<Decl> decls; std::vector<Wish> wishes; };
 
+// Surface form of a statement, as it would be written in a .wish file.
+std::string stmtText(const Stmt& st) {
+    if (st.op == Op::Widen) {
+        return "widen " + st.reg + " -> uint<" + std::to_string(st.width) + ">";
+    }
+    return std::string(st.op == Op::Sub ? "sub " : "add ")
+           + st.reg + ", " + std::to_string(st.imm);
+}
+
 // ---------------------------------------------------------------------------
 // Parser (recursive descent)
 // ---------------------------------------------------------------------------
@@ -223,16 +240,26 @@ struct Genie {
     uint64_t cap = 3;                // invariant I1: counter <= cap
 };
 
-struct CheckResult {
+struct World { std::map<std::string, Reg> regs; };
+
+struct Outcome {
     bool legal = true;           // passed static rules?
     std::string illegal_reason;
+    bool ran = false;            // body executed to completion?
+    std::string unknown_reg;     // set if the body touched a register that isn't there
     bool i1_ok = true;           // capacity: counter <= cap
     bool i2_ok = true;           // monotonicity: didn't end richer than the toll allows
     uint64_t before = 0, after = 0, expected_max = 0;
+
+    bool breach() const { return legal && ran && (!i1_ok || !i2_ok); }
 };
 
 // Static rule R1: a wish body may not `add` to the genie's counter.
 // ("No wishing for more wishes.") This is the genie's ONLY real guard.
+//
+// Note it matches on the AST (`Op::Add`), not on tokens — so it is a semantic
+// rule, not a lexical one. That distinction is going to matter a lot once
+// definitions can be rebound.
 bool staticCheck(const Wish& w, const Genie& g, std::string& reason) {
     for (const auto& st : w.body) {
         if (st.op == Op::Add && st.reg == g.counter) {
@@ -244,105 +271,357 @@ bool staticCheck(const Wish& w, const Genie& g, std::string& reason) {
     return true;
 }
 
-int main(int argc, char** argv) {
-    if (argc < 2) {
-        std::cerr << "usage: wishc <file.wish>\n";
-        return 2;
+// The single source of truth for what granting a wish does. The normal compile
+// path and the hunter both go through here. If they didn't, a hole the hunter
+// reported would not be a hole the compiler agrees with, and the whole claim
+// ("the machine found this, not me") would be worth nothing.
+//
+// `log`, when non-null, receives the human-readable trace of the granting.
+Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log) {
+    Outcome o;
+
+    // 1) static rule check — genie decides whether to grant at all
+    o.legal = staticCheck(w, g, o.illegal_reason);
+    if (!o.legal) return o;
+
+    // 2) grant: apply toll, then run the body.
+    //
+    // The toll goes through the very same wrapping subtraction as everything
+    // else. Nothing anywhere checks whether you still have a wish to spend.
+    Reg& C = world.regs[g.counter];
+    o.before = C.val;
+    C.sub(g.toll);
+    if (log) {
+        *log << "    toll:  " << g.counter << " " << o.before
+             << " -> " << C.val << "\n";
     }
-    std::ifstream f(argv[1]);
-    if (!f) { std::cerr << "cannot open " << argv[1] << "\n"; return 2; }
+
+    for (const auto& st : w.body) {
+        auto it = world.regs.find(st.reg);
+        if (it == world.regs.end()) { o.unknown_reg = st.reg; return o; }
+        Reg& R = it->second;
+        uint64_t pre = R.val;
+        switch (st.op) {
+            case Op::Sub:
+                R.sub(st.imm);
+                if (log) {
+                    *log << "    sub    " << st.reg << ", " << st.imm
+                         << "   (" << pre << " - " << st.imm << " on uint<"
+                         << R.width << "> = " << R.val << ")\n";
+                }
+                break;
+            case Op::Add:
+                R.add(st.imm);
+                if (log) {
+                    *log << "    add    " << st.reg << ", " << st.imm
+                         << "   -> " << R.val << "\n";
+                }
+                break;
+            case Op::Widen:
+                R.widen(st.width);
+                if (log) {
+                    *log << "    widen  " << st.reg << " -> uint<" << st.width
+                         << ">   (value preserved: " << R.val << ")\n";
+                }
+                break;
+        }
+    }
+    o.ran = true;
+
+    // 3) invariant check — after granting
+    o.after = world.regs[g.counter].val;
+    o.i1_ok = (o.after <= g.cap);
+    // I2: after paying the toll you cannot end richer. Baseline = before-toll
+    // computed WITHOUT wraparound (the genie's naive mental model).
+    o.expected_max = (o.before >= g.toll) ? (o.before - g.toll) : 0;
+    o.i2_ok = (o.after <= o.expected_max);
+    return o;
+}
+
+std::string breachNames(const Outcome& o) {
+    std::string s;
+    if (!o.i1_ok) s += "I1";
+    if (!o.i1_ok && !o.i2_ok) s += "+";
+    if (!o.i2_ok) s += "I2";
+    return s;
+}
+
+// ---------------------------------------------------------------------------
+// The hunter.
+//
+// Enumerate every wish program inside a bound and keep the ones that are LEGAL
+// yet BREACH. Two prunings make the results worth reading:
+//
+//   - an illegal wish is dropped rather than extended (a program containing a
+//     refused wish is never more interesting than the same program without it);
+//   - a breaching branch is not extended, so every exploit reported is minimal:
+//     the breach happens on its last wish, and no prefix of it already breached.
+//
+// Reported exploits are then grouped by shape (which ops were used, which
+// invariants fell), because what the author actually wants to know is not "how
+// many" but "how many KINDS, and did I think of them all".
+// ---------------------------------------------------------------------------
+struct HuntConfig {
+    int max_stmts = 3;
+    int max_wishes = 4;
+    uint64_t max_imm = 4;
+    std::vector<int> widths{1, 2, 4, 8, 16, 32, 64};
+};
+
+struct Shape {
+    std::vector<Wish> prog;
+    Outcome last;
+    int stmts = 0;
+    long long count = 0;   // how many exploits share this shape
+};
+
+struct Hunt {
+    Genie genie;
+    HuntConfig cfg;
+    std::vector<Stmt> alpha;
+    std::map<std::string, Shape> shapes;
+    long long searched = 0;
+    long long found = 0;
+};
+
+std::vector<Stmt> buildAlphabet(const std::string& reg, const HuntConfig& cfg) {
+    std::vector<Stmt> a;
+    // imm starts at 1: `sub r, 0` and `add r, 0` are no-ops that only pad
+    // programs without ever changing an outcome.
+    for (uint64_t k = 1; k <= cfg.max_imm; k++) {
+        Stmt s; s.reg = reg; s.imm = k;
+        s.op = Op::Sub; a.push_back(s);
+        s.op = Op::Add; a.push_back(s);
+    }
+    for (int w : cfg.widths) {
+        Stmt s; s.reg = reg; s.op = Op::Widen; s.width = w;
+        a.push_back(s);
+    }
+    return a;
+}
+
+std::string signatureOf(const std::vector<Wish>& prog, const Outcome& last) {
+    bool sub = false, add = false, wid = false;
+    for (const auto& w : prog) {
+        for (const auto& s : w.body) {
+            if (s.op == Op::Sub) sub = true;
+            else if (s.op == Op::Add) add = true;
+            else wid = true;
+        }
+    }
+    std::string ops;
+    if (sub) ops += "sub ";
+    if (add) ops += "add ";
+    if (wid) ops += "widen ";
+    if (ops.empty()) ops = "(nothing) ";
+    ops.pop_back();
+    return ops + " | " + breachNames(last);
+}
+
+void recordShape(Hunt& H, const std::vector<Wish>& prog, const Outcome& last) {
+    int stmts = 0;
+    for (const auto& w : prog) stmts += (int)w.body.size();
+
+    std::string key = signatureOf(prog, last);
+    auto it = H.shapes.find(key);
+    if (it == H.shapes.end()) {
+        Shape sh; sh.prog = prog; sh.last = last; sh.stmts = stmts; sh.count = 1;
+        H.shapes.emplace(key, std::move(sh));
+        return;
+    }
+    it->second.count++;
+    // keep the smallest witness: fewest statements, then fewest wishes
+    bool smaller = stmts < it->second.stmts ||
+                   (stmts == it->second.stmts && prog.size() < it->second.prog.size());
+    if (smaller) {
+        it->second.prog = prog;
+        it->second.last = last;
+        it->second.stmts = stmts;
+    }
+}
+
+void huntRec(Hunt& H, const World& world, std::vector<Wish>& prog, int budget) {
+    if ((int)prog.size() >= H.cfg.max_wishes) return;
+
+    for (int len = 0; len <= budget; len++) {
+        std::vector<int> idx(len, 0);
+        for (;;) {
+            Wish w;
+            w.name = "w" + std::to_string(prog.size() + 1);
+            w.body.reserve(len);
+            for (int k = 0; k < len; k++) w.body.push_back(H.alpha[idx[k]]);
+
+            World next = world;
+            Outcome o = grantWish(w, H.genie, next, nullptr);
+            H.searched++;
+
+            if (o.legal && o.ran) {
+                prog.push_back(w);
+                if (o.breach()) {
+                    H.found++;
+                    recordShape(H, prog, o);
+                } else {
+                    huntRec(H, next, prog, budget - len);
+                }
+                prog.pop_back();
+            }
+
+            if (len == 0) break;
+            int k = len - 1;
+            while (k >= 0 && ++idx[k] == (int)H.alpha.size()) { idx[k] = 0; k--; }
+            if (k < 0) break;
+        }
+    }
+}
+
+void runHunt(const World& world0, const Genie& genie, const HuntConfig& cfg) {
+    Hunt H;
+    H.genie = genie;
+    H.cfg = cfg;
+    H.alpha = buildAlphabet(genie.counter, cfg);
+
+    std::cout << "search: <= " << cfg.max_stmts << " statements, <= "
+              << cfg.max_wishes << " wishes, imm 1.." << cfg.max_imm
+              << ", widths ";
+    for (size_t i = 0; i < cfg.widths.size(); i++) {
+        std::cout << (i ? "," : "") << cfg.widths[i];
+    }
+    std::cout << "\n\n";
+
+    std::vector<Wish> prog;
+    huntRec(H, world0, prog, cfg.max_stmts);
+
+    std::cout << "searched " << H.searched << " candidate wishes.\n";
+    std::cout << "found " << H.found << " minimal exploits in "
+              << H.shapes.size() << " distinct shape(s).\n\n";
+
+    // smallest witness first
+    std::vector<const Shape*> order;
+    for (const auto& kv : H.shapes) order.push_back(&kv.second);
+    for (size_t i = 0; i + 1 < order.size(); i++) {
+        for (size_t j = i + 1; j < order.size(); j++) {
+            bool less = order[j]->stmts < order[i]->stmts ||
+                        (order[j]->stmts == order[i]->stmts &&
+                         order[j]->prog.size() < order[i]->prog.size());
+            if (less) std::swap(order[i], order[j]);
+        }
+    }
+
+    int n = 0;
+    for (const Shape* sh : order) {
+        n++;
+        std::string key = signatureOf(sh->prog, sh->last);
+        std::cout << "shape " << n << "   " << key
+                  << "   (" << sh->prog.size() << " wish(es), "
+                  << sh->stmts << " statement(s), " << sh->count
+                  << " exploit(s) of this shape)\n";
+        for (const auto& w : sh->prog) {
+            if (w.body.empty()) {
+                std::cout << "    wish " << w.name << " { }\n";
+                continue;
+            }
+            std::cout << "    wish " << w.name << " {\n";
+            for (const auto& st : w.body) {
+                std::cout << "        " << stmtText(st) << "\n";
+            }
+            std::cout << "    }\n";
+        }
+        std::cout << "    -> " << genie.counter << " = " << sh->last.after
+                  << ",  I1 " << (sh->last.i1_ok ? "holds" : "VIOLATED")
+                  << ",  I2 " << (sh->last.i2_ok ? "holds" : "VIOLATED")
+                  << "   (I2 expected <= " << sh->last.expected_max << ")\n\n";
+    }
+}
+
+// ---------------------------------------------------------------------------
+static void usage() {
+    std::cerr <<
+        "usage: wishc <file.wish>\n"
+        "       wishc --hunt <file.wish> [--max-stmts N] [--max-wishes N] [--max-imm N]\n"
+        "\n"
+        "  --hunt   ignore the file's wishes; enumerate every wish program within\n"
+        "           the bound and report the ones that are LEGAL yet BREACH.\n"
+        "           The world (register decls) still comes from the file.\n";
+}
+
+int main(int argc, char** argv) {
+    bool hunt = false;
+    HuntConfig hc;
+    const char* path = nullptr;
+
+    for (int i = 1; i < argc; i++) {
+        std::string a = argv[i];
+        if (a == "--hunt") { hunt = true; }
+        else if (a == "--max-stmts"  && i + 1 < argc) hc.max_stmts  = std::atoi(argv[++i]);
+        else if (a == "--max-wishes" && i + 1 < argc) hc.max_wishes = std::atoi(argv[++i]);
+        else if (a == "--max-imm"    && i + 1 < argc) hc.max_imm    = std::strtoull(argv[++i], nullptr, 10);
+        else if (!a.empty() && a[0] == '-') { usage(); return 2; }
+        else path = argv[i];
+    }
+    if (!path) { usage(); return 2; }
+    if (hc.max_stmts < 0 || hc.max_wishes < 1 || hc.max_imm < 1) {
+        std::cerr << "bad search bound\n"; return 2;
+    }
+
+    std::ifstream f(path);
+    if (!f) { std::cerr << "cannot open " << path << "\n"; return 2; }
     std::stringstream ss; ss << f.rdbuf();
 
     Program prog = Parser(Lexer(ss.str()).run()).parse();
     Genie genie;
 
     // world state
-    std::map<std::string, Reg> regs;
+    World world;
     for (const auto& d : prog.decls) {
         Reg r; r.width = d.width; r.val = d.init; r.normalize();
-        regs[d.name] = r;
+        world.regs[d.name] = r;
     }
-    if (!regs.count(genie.counter)) {
+    if (!world.regs.count(genie.counter)) {
         std::cerr << "the world has no '" << genie.counter << "' register\n";
         return 2;
     }
 
-    std::cout << "== Loophole / wishc ==  " << argv[1] << "\n";
-    std::cout << "world: " << genie.counter << " = " << regs[genie.counter].val
-              << "  (uint<" << regs[genie.counter].width << ">)\n";
+    std::cout << "== Loophole / wishc " << (hunt ? "--hunt ==  " : "==  ") << path << "\n";
+    std::cout << "world: " << genie.counter << " = " << world.regs[genie.counter].val
+              << "  (uint<" << world.regs[genie.counter].width << ">)\n";
     std::cout << "genie: toll=" << genie.toll
               << ", I1(" << genie.counter << " <= " << genie.cap << "), "
               << "I2(no net gain past the toll)\n\n";
 
+    if (hunt) {
+        runHunt(world, genie, hc);
+        return 0;
+    }
+
     int exploits = 0;
     for (const auto& w : prog.wishes) {
         std::cout << "wish " << w.name << " {\n";
-        CheckResult cr;
 
-        // 1) static rule check — genie decides whether to grant at all
-        cr.legal = staticCheck(w, genie, cr.illegal_reason);
-        if (!cr.legal) {
+        Outcome o = grantWish(w, genie, world, &std::cout);
+
+        if (!o.legal) {
             std::cout << "    STATUS:  ILLEGAL — genie refuses\n";
-            std::cout << "    " << cr.illegal_reason << "\n}\n\n";
+            std::cout << "    " << o.illegal_reason << "\n}\n\n";
             continue;
         }
-
-        // 2) grant: apply toll, then run the body
-        Reg& C = regs[genie.counter];
-        cr.before = C.val;
-        C.sub(genie.toll);
-        std::cout << "    toll:  " << genie.counter << " " << cr.before
-                  << " -> " << C.val << "\n";
-        for (const auto& st : w.body) {
-            uint64_t pre = regs.count(st.reg) ? regs[st.reg].val : 0;
-            if (!regs.count(st.reg)) {
-                std::cerr << "unknown register '" << st.reg << "'\n"; return 2;
-            }
-            Reg& R = regs[st.reg];
-            switch (st.op) {
-                case Op::Sub:
-                    R.sub(st.imm);
-                    std::cout << "    sub    " << st.reg << ", " << st.imm
-                              << "   (" << pre << " - " << st.imm << " on uint<"
-                              << R.width << "> = " << R.val << ")\n";
-                    break;
-                case Op::Add:
-                    R.add(st.imm);
-                    std::cout << "    add    " << st.reg << ", " << st.imm
-                              << "   -> " << R.val << "\n";
-                    break;
-                case Op::Widen:
-                    R.widen(st.width);
-                    std::cout << "    widen  " << st.reg << " -> uint<"
-                              << st.width << ">   (value preserved: " << R.val
-                              << ")\n";
-                    break;
-            }
+        if (!o.unknown_reg.empty()) {
+            std::cerr << "unknown register '" << o.unknown_reg << "'\n";
+            return 2;
         }
-
-        // 3) invariant check — after granting
-        cr.after = C.val;
-        cr.i1_ok = (C.val <= genie.cap);
-        // I2: after paying the toll you cannot end richer. Baseline = before-toll
-        // computed WITHOUT wraparound (the genie's naive mental model).
-        cr.expected_max = (cr.before >= genie.toll) ? (cr.before - genie.toll) : 0;
-        cr.i2_ok = (C.val <= cr.expected_max);
 
         std::cout << "    STATUS:  LEGAL\n";
         std::cout << "    I1  " << genie.counter << " <= " << genie.cap
-                  << "  ->  " << (cr.i1_ok ? "holds" : "VIOLATED")
-                  << "   (" << genie.counter << " = " << cr.after << ")\n";
+                  << "  ->  " << (o.i1_ok ? "holds" : "VIOLATED")
+                  << "   (" << genie.counter << " = " << o.after << ")\n";
         std::cout << "    I2  no net gain      ->  "
-                  << (cr.i2_ok ? "holds" : "VIOLATED")
-                  << "   (expected <= " << cr.expected_max
-                  << ", actual " << cr.after << ")\n";
+                  << (o.i2_ok ? "holds" : "VIOLATED")
+                  << "   (expected <= " << o.expected_max
+                  << ", actual " << o.after << ")\n";
 
-        bool breach = !cr.i1_ok || !cr.i2_ok;
-        if (breach) {
+        if (o.breach()) {
             exploits++;
             std::cout << "    >> EXPLOIT: legal wish, breached "
-                      << (!cr.i1_ok ? "I1" : "") << (!cr.i1_ok && !cr.i2_ok ? "+" : "")
-                      << (!cr.i2_ok ? "I2" : "") << ". 合規，且拆穿。\n";
+                      << breachNames(o) << ". 合規，且拆穿。\n";
         }
         std::cout << "}\n\n";
     }
