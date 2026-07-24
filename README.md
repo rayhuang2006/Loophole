@@ -154,7 +154,8 @@ wish tidy {
 | [名詞解釋](docs/guide/concepts.md) | 溢位、不變量、量詞、SAT 是什麼。不用先會 |
 | [笑話清單](docs/guide/jokes.md) | 每一招完整拆解 |
 | [自己動手](docs/guide/tutorial.md) | 寫一個願望，寫一個精靈 |
-| [操作語義](docs/SEMANTICS.md) | 精確規格。每個指令到底做什麼 |
+| [語言規格 1.0](docs/spec/loophole-1.0.md) | 正式白皮書（英文），模仿 C++/Python 標準的寫法 |
+| [操作語義](docs/SEMANTICS.md) | 精確語義的中文說明。每個指令到底做什麼 |
 | [設計筆記](docs/DESIGN.md) | 為什麼長成這樣，走過哪些彎路 |
 | [願景與全家桶](docs/VISION.md) | 這個專案想長成什麼樣、三個子專案的規劃 |
 
