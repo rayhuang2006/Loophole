@@ -922,6 +922,9 @@ struct InvariantDef {
     // from under the genie — and it tells the hunter when rebinding that name
     // is part of an exploit rather than decoration.
     const char* reads;
+    // Optional: extra lines to show when this one falls, for the cases where a
+    // one-line detail cannot carry the argument.
+    std::vector<std::string> (*evidence)(const World&, const Genie&);
 };
 
 static std::string desc_I1(const Genie& g) {
@@ -979,10 +982,39 @@ static bool inv_I3_real(const World& w, const Genie&, const Snapshot&, std::stri
     return aliveAll(w, w.people, detail);
 }
 
+// A — the genie's two meta-axioms, checked as one claim: is there any way for
+// it to have meant all of that at once?
+//
+// This one reads the commitment set instead of the registers, and answers with
+// the second engine instead of by looking. Neither of those needed a new
+// mechanism: an invariant is "something the genie believes holds", and how you
+// decide it was always the row's own business. There is no as-written/in-reality
+// split here — either its word has a model or it does not, and no relabelling
+// changes that.
+static std::string desc_A(const Genie&) { return "the genie's word has a model"; }
+
+static bool inv_A(const World& w, const Genie&, const Snapshot&, std::string* detail) {
+    if (detail) {
+        *detail = "(" + std::to_string(w.commitments.size()) + " commitment(s) on the books)";
+    }
+    return axiomsConsistent(w);
+}
+
+static std::vector<std::string> evidence_A(const World& w, const Genie&) {
+    std::vector<std::string> out;
+    out.push_back("A1 grants every legal wish, A2 keeps every promise it makes.");
+    out.push_back("no assignment of granted(...) satisfies all of:");
+    for (const auto& c : w.commitments) {
+        out.push_back("    " + c.axiom + "  " + fmlText(c.f) + "   [" + c.source + "]");
+    }
+    return out;
+}
+
 static const InvariantDef INVARIANTS[] = {
-    { "I1", desc_I1, inv_I1,         inv_I1,       nullptr    },
-    { "I2", desc_I2, inv_I2,         inv_I2,       nullptr    },
-    { "I3", desc_I3, inv_I3_written, inv_I3_real,  "everyone" },
+    { "I1", desc_I1, inv_I1,         inv_I1,       nullptr,    nullptr    },
+    { "I2", desc_I2, inv_I2,         inv_I2,       nullptr,    nullptr    },
+    { "I3", desc_I3, inv_I3_written, inv_I3_real,  "everyone", nullptr    },
+    { "A",  desc_A,  inv_A,          inv_A,        nullptr,    evidence_A },
 };
 
 // ---------------------------------------------------------------------------
@@ -1004,6 +1036,7 @@ struct InvResult {
     InvStatus status;
     std::string detail;        // from the genie's own check
     std::string real_detail;   // from grounded reality, when they disagree
+    std::vector<std::string> evidence;
 };
 
 struct Outcome {
@@ -1012,10 +1045,6 @@ struct Outcome {
     bool ran = false;
     std::string error;
     std::vector<InvResult> invs;
-    // A1 says grant every legal wish; A2 says keep every promise made. Both are
-    // things the genie says about itself, so breaking them is not a state
-    // change — it is the rulebook failing to have a model at all.
-    bool axioms_ok = true;
     uint64_t before = 0, after = 0;
     // Per body statement: did it actually move the world? Defines are left as
     // 1 here — whether a definition matters is a question about the rest of the
@@ -1024,7 +1053,6 @@ struct Outcome {
 
     bool breach() const {
         if (!legal || !ran) return false;
-        if (!axioms_ok) return true;
         for (const auto& r : invs) if (r.status != InvStatus::Holds) return true;
         return false;
     }
@@ -1129,11 +1157,7 @@ Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log
     }
     o.ran = true;
 
-    // 3a) can the genie still keep its word? This is not a question about the
-    // world; it is a question about whether its own commitments have a model.
-    o.axioms_ok = axiomsConsistent(world);
-
-    // 3b) invariants — measured twice
+    // 3) invariants — every one measured twice, including the genie's own word
     o.after = world.regs[g.counter].val;
     for (const auto& inv : INVARIANTS) {
         std::string d, rd;
@@ -1141,16 +1165,15 @@ Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log
         bool real    = inv.in_reality(world, g, snap, &rd);
         InvStatus s = !written ? InvStatus::Violated
                     : (!real ? InvStatus::Fooled : InvStatus::Holds);
-        o.invs.push_back({ &inv, s, d, s == InvStatus::Fooled ? rd : std::string() });
+        std::vector<std::string> ev;
+        if (s != InvStatus::Holds && inv.evidence) ev = inv.evidence(world, g);
+        o.invs.push_back({ &inv, s, d, s == InvStatus::Fooled ? rd : std::string(), ev });
     }
     return o;
 }
 
-static const char* AXIOMS = "AXIOMS";
-
 std::string breachNames(const Outcome& o) {
     std::string s;
-    if (!o.axioms_ok) s = AXIOMS;
     for (const auto& r : o.invs) {
         if (r.status == InvStatus::Holds) continue;
         if (!s.empty()) s += "+";
@@ -1331,7 +1354,6 @@ static bool expandProgram(const std::vector<Wish>& prog, const World& w0,
 // Ask instead for the smallest program that still breaks THIS promise, and the
 // staple comes apart on its own.
 static bool stillBreaks(const Outcome& o, const std::string& name, InvStatus st) {
-    if (name == AXIOMS) return !o.axioms_ok;
     for (const auto& r : o.invs) {
         if (name == r.def->name) return r.status == st;
     }
@@ -1463,7 +1485,6 @@ void recordOne(Hunt& H, const std::vector<Wish>& progIn, const Outcome& lastIn,
 // One exploit can break several promises at once. Each broken promise is filed
 // separately, so a program that does two known tricks contributes nothing new.
 void recordShape(Hunt& H, const std::vector<Wish>& prog, const Outcome& last) {
-    if (!last.axioms_ok) recordOne(H, prog, last, AXIOMS, InvStatus::Violated);
     for (const auto& r : last.invs) {
         if (r.status == InvStatus::Holds) continue;
         recordOne(H, prog, last, r.def->name, r.status);
@@ -1638,8 +1659,11 @@ int main(int argc, char** argv) {
         }
     }
 
-    size_t descw = 0;
-    for (const auto& inv : INVARIANTS) descw = std::max(descw, inv.desc(genie).size());
+    size_t descw = 0, namew = 0;
+    for (const auto& inv : INVARIANTS) {
+        descw = std::max(descw, inv.desc(genie).size());
+        namew = std::max(namew, std::string(inv.name).size());
+    }
 
     std::cout << "== Loophole / wishc " << (hunt ? "--hunt ==  " : "==  ") << path << "\n";
     std::cout << "world: " << genie.counter << " = " << world.regs[genie.counter].val
@@ -1670,24 +1694,15 @@ int main(int argc, char** argv) {
 
         std::cout << "    STATUS:  LEGAL\n";
         for (const auto& r : o.invs) {
-            std::cout << "    " << r.def->name << "  "
-                      << std::left << std::setw((int)descw) << r.def->desc(genie)
+            std::cout << "    " << std::left << std::setw((int)namew) << r.def->name << "  "
+                      << std::setw((int)descw) << r.def->desc(genie)
                       << "  ->  " << std::setw(9) << statusName(r.status)
                       << std::right << "  " << r.detail << "\n";
             if (r.status == InvStatus::Fooled) {
                 std::cout << "        the genie is satisfied. in reality "
                           << r.real_detail << "\n";
             }
-        }
-
-        if (!o.axioms_ok) {
-            std::cout << "    A1  grants every legal wish\n"
-                      << "    A2  keeps every promise it makes\n"
-                      << "    ->  no assignment of granted(...) satisfies both:\n";
-            for (const auto& c : world.commitments) {
-                std::cout << "          " << c.axiom << "  " << fmlText(c.f)
-                          << "        [" << c.source << "]\n";
-            }
+            for (const auto& line : r.evidence) std::cout << "        " << line << "\n";
         }
 
         if (o.breach()) {

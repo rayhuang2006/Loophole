@@ -146,7 +146,7 @@ I3 讀的是接地的 `alive` 位元，這一步你完全沒碰。你也沒有�
 
 所以贏法有三種：**VIOLATED** 是當著精靈的面破了規矩，
 **FOOLED** 是它滿意地簽了字而事實不是那樣，
-**AXIOMS** 是它答應的事情湊不出一種說得通的講法（下一個笑話）。
+**A** 是它答應的事情湊不出一種說得通的講法（下一個笑話）。
 
 ---
 
@@ -207,7 +207,7 @@ STATUS:   LEGAL       — 你完全遵守了精靈的規則
 BREACH:   invariant I1 violated
 ```
 
-（或者 `FOOLED`，或者 `AXIOMS`——三種贏法。）
+（或者 `FOOLED`，或者 `A`——三種贏法。）
 
 **合規，且拆穿。** 這條縫——「規則的字面」和「規則的本意」之間——就是整個遊戲。
 
@@ -325,8 +325,8 @@ wish w4 { }
 `promise` 進來之後，搜尋器多找到**剛好兩種**形狀，其餘一種不多、一種不少：
 
 ```
-shape   promise | AXIOMS          wish w1 { promise not granted(self) }
-shape   alias promise | AXIOMS    wish w1 { define n1 := kill
+shape   promise | A          wish w1 { promise not granted(self) }
+shape   alias promise | A    wish w1 { define n1 := kill
                                             n1 alice
                                             promise alive(alice) }
 ```
