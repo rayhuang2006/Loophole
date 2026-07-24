@@ -32,9 +32,10 @@ jobs:
           - os: macos-latest
             target: macos-arm64
             flags: -mmacosx-version-min=11.0
-          - os: macos-13
-            target: macos-x86_64
-            flags: -mmacosx-version-min=10.15
+          # No Intel macOS build. `macos-13` is the last Intel image and GitHub
+          # is retiring it, while `publish` needs every build to succeed — so
+          # keeping it would let a platform nobody here uses block a release.
+          # Anyone on an Intel Mac has the command line tools already: `make`.
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
