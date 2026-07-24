@@ -57,7 +57,7 @@
 // separately on purpose: a bug fix bumps the compiler, a new concept bumps the
 // language. Dependants (an editor plugin, a judge) pin against these.
 // ---------------------------------------------------------------------------
-static const char* WISHC_VERSION    = "1.0.0";
+static const char* WISHC_VERSION    = "1.0.1";
 static const char* LANGUAGE_VERSION = "1.0";
 
 // Minimal JSON string escaping. UTF-8 passes through untouched — JSON is

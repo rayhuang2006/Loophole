@@ -159,12 +159,12 @@ wish tidy {
 
 ```bash
 ./wishc --json examples/01_humble.wish     # 機器可讀的判決
-./wishc --version                          # wishc 1.0.0  (Loophole language 1.0)
+./wishc --version                          # wishc 1.0.1  (Loophole language 1.0)
 ```
 
 ```json
 {
-  "wishc": "1.0.0", "language": "1.0",
+  "wishc": "1.0.1", "language": "1.0",
   "wishes": [
     { "wish": "humble", "legal": true,
       "invariants": [ { "name": "I2", "verdict": "violated", "detail": "(wishes = 3, needs <= 2)" } ],
@@ -204,6 +204,7 @@ wish tidy {
 | [操作語義](docs/SEMANTICS.md) | 精確語義的中文說明。每個指令到底做什麼 |
 | [設計筆記](docs/DESIGN.md) | 為什麼長成這樣，走過哪些彎路 |
 | [願景與全家桶](docs/VISION.md) | 這個專案想長成什麼樣、三個子專案的規劃 |
+| [Changelog](CHANGELOG.md) | 每一版改了什麼 |
 
 ---
 
