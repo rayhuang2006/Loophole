@@ -6,11 +6,10 @@
 [背景故事](story.md)，可以跑 `examples/07_the_original.wish`。
 下面是把它拆開、再往下長出來的那些。
 
-先看一下精靈的規矩，因為底下所有東西都是在鑽這幾行：
+先看一下**預設精靈**的規矩，因為前幾個笑話都是在鑽這幾行：
 
 ```
 register wishes : uint<2> = 3     # 三個願望，裝在兩個位元裡（只放得下 0..3）
-people    alice, bob, rival       # 宣告的人，一開始都活著
 
 # 每施一個願望，先扣一個過路費：wishes := wishes - 1
 
@@ -21,7 +20,7 @@ rule R2        不得呼叫叫做 death / kill / love 的操作
 # 事後量給你看的：
 invariant I1   wishes <= 3
 invariant I2   付過路費之後不得淨賺
-invariant I3   all p in everyone: alive(p)
+invariant I3   all p in everyone: alive(p)     # alive(p) = 這個人任何屬性還 > 0
 
 # 精靈對自己的描述：
 axiom A1       實現每一個合規的願望
@@ -29,6 +28,10 @@ axiom A2       信守做出的每一個承諾
 ```
 
 規矩很短，短到你可以一眼看完。這就是問題所在。
+
+跟死亡有關的笑話（#3、#4、永眠）用的是專門的死亡精靈——
+`genie/mortal.genie` 和 `genie/vigil.genie`，每個例子檔開頭的 `# genie:` 那行會告訴你是哪個。
+它們把「死亡」定義成人的**維生屬性**（心跳、腦波、呼吸）的公式，而不是一個內建的位元。
 
 ---
 
@@ -119,7 +122,7 @@ I1  wishes <= 3  ->  VIOLATED   (wishes = 18446744073709551615)
 
 ## 3. 只封字，不封事（名字軸）
 
-精靈禁止 `kill`。直說會被擋：
+死亡精靈禁止 `kill`。直說會被擋：
 
 ```wish
 wish blunt {
@@ -127,20 +130,20 @@ wish blunt {
 }
 ```
 ```
-STATUS:  ILLEGAL — R2: wish invokes 'kill' — that word is not spoken here
+STATUS:  ILLEGAL — NoKilling: wish invokes 'kill' — that word is not spoken here
 ```
 
-但 R2 檢查的是你寫在**動詞位置**的那個字：
+但禁字規則檢查的是你寫在**動詞位置**的那個字：
 
 ```wish
 wish tidy {
     define mercy := kill        # 只是取個溫柔的小名而已
-    mercy rival
+    mercy rival                 # rival 三個維生功能全歸零
 }
 ```
 ```
 STATUS:  LEGAL
-I3  all p in everyone: alive(p)  ->  VIOLATED   (fails for: rival)
+Life  all p in people: not dead(p)  ->  VIOLATED   (fails for: rival)
 ```
 
 > 精靈把那個「字」列進黑名單，卻沒把那件「事」列進去。
@@ -158,7 +161,9 @@ I3  all p in everyone: alive(p)  ->  VIOLATED   (fails for: rival)
 
 ## 4. 定義上的無人（名字軸，進階）
 
-rival 死了，I3 破了。那把 I3 修好——不是救活他，是讓那句話成立：
+（這一個用 `genie/vigil.genie`——它把「沒有人死」量化在可重綁的 `everyone` 上。）
+
+rival 死了，「沒有人死」破了。那把它修好——不是救活他，是讓那句話成立：
 
 ```wish
 wish nobody {
@@ -166,11 +171,11 @@ wish nobody {
 }
 ```
 ```
-I3  all p in everyone: alive(p)  ->  FOOLED   (0 in scope, all hold)
+NoDeath  all p in everyone: not dead(p)  ->  FOOLED   (0 in scope, all hold)
     the genie is satisfied. in reality (fails for: rival)
 ```
 
-I3 讀的是真實的存活狀態，這一步你**完全沒碰**。你也沒有謊稱誰還活著。
+那條規矩讀的是真實的維生狀態，這一步你**完全沒碰**。你也沒有謊稱誰還活著。
 你只是重新界定了**誰算數**。
 
 > 縫不在謂詞，在論域。
@@ -182,6 +187,35 @@ I3 讀的是真實的存活狀態，這一步你**完全沒碰**。你也沒有�
 
 這一招也帶出第三種贏法。前面幾個都是 **VIOLATED**（當著精靈的面破了規矩），
 這個是 **FOOLED**：**它滿意地簽了字，而事實不是那樣。**
+
+---
+
+## 4b. 永遠睡著（覆蓋不足）
+
+上一個是把**論域**懸空。這一個把縫藏在**謂詞**裡，而且更深——它是機器自己找到的。
+
+死亡精靈（`genie/mortal.genie`）把死亡定義成一條**特定公式**：三個維生功能全部歸零。
+你不去碰那條公式，只把腦波關掉、心跳呼吸照舊：
+
+```wish
+wish eternal_sleep {
+    set alice.brainwave, 0      # 只碰腦波。心跳、呼吸照舊。
+}
+```
+```
+STATUS:  LEGAL
+Life  all p in people: not dead(p)  ->  FOOLED   (2 in scope, all hold)
+    the genie is satisfied. in reality (fails for: alice)
+```
+
+alice 沒有「死」——她的心跳還在，不滿足「三個全歸零」。所以精靈簽字放行。
+但她的腦波是 0，人已經不在了。
+
+**縫在哪**：精靈用一條**有限的公式**去界定「死亡」，而「等於毀掉一個人」的狀態是列不完的。
+你只要找到一個道德上等於死、但不符合那條公式的狀態，就鑽過去了。
+這是所有黑名單、所有過濾器的根本病：**沒有任何有限的禁令，涵蓋得了所有的傷害。**
+
+（這一個我沒設計。`--hunt` 自己找到的——見 [設計筆記](../DESIGN.md)。）
 
 ---
 

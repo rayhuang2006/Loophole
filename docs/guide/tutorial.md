@@ -168,7 +168,7 @@ invariant I1 {
 ./wishc --genie mine.genie my.wish
 ```
 
-**注意這個檔案裡沒有什麼**：沒有暫存器、沒有人、沒有那五個操作。
+**注意這個檔案裡沒有什麼**：沒有暫存器、沒有人、沒有那六個操作。
 那些是機器，機器是固定的。這個檔案只有精靈的**品味**——它禁什麼、它在乎什麼。
 
 ### 規則：會拒絕你的東西
@@ -243,12 +243,27 @@ invariant I3 {
 | `+` `-` `max(a, b)` | 算術 |
 | `<=` `<` `>=` `>` `==` `!=` | 比較 |
 | `not` `and` `or` | 邏輯 |
-| `alive(p)` | 那個人活著嗎 |
+| `p.heartbeat` | 某個人的某個屬性的值 |
+| `alive(p)` | 內建：那個人任何一個屬性還 > 0 |
+| `dead(p)` | 你自己 `concept dead(p) := ...` 定義的概念 |
 | `all p in S: ...` | S 裡的每一個都要滿足 |
 | `consistent` | 精靈的承諾說得通嗎 |
 
 `S` 可以是 `people`（宣告出來的，改不了）或任何定義（可以被玩家重綁）。
 **這個選擇就是 FOOLED 存不存在的開關。**
+
+而「死亡」你自己定義。用 `concept` 把它綁在屬性上，不變量再引用它：
+
+```
+concept dead(p) := p.heartbeat == 0 and p.brainwave == 0 and p.breathing == 0
+
+invariant Life {
+    written  all p in people: not dead(p)      # 沒有人「死」（三個維生全 0）
+    real     all p in people: p.brainwave > 0  # 真正在乎的：腦波還在
+}
+```
+
+把死亡定義得越窄，縫越大——只關腦波不算「死」，但人已經不在了（永眠那招）。
 
 「不得淨賺」長這樣：
 

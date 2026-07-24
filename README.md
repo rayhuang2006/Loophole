@@ -172,9 +172,10 @@ wish tidy {
 - **Phase 2** 別名軸：可重綁的定義、人與生死。**done**
 - **Phase 3** 自我指涉：承諾、精靈的元公理、命題邏輯引擎。**done**
 - **Phase 4** 精靈變成可載入的資料檔。**done**
-- **Phase 5** 讓別人提交願望和精靈、CI 驗證、瀏覽器 playground。
+- **v1.0** 兩層世界模型：人的屬性 + 精靈用 `concept` 定義的死亡。**done**（規格見 [語言規格 1.0](docs/spec/loophole-1.0.md)）
+- **接下來** 讓別人提交願望和精靈、CI 驗證、瀏覽器 playground。
 
-現在的語言認得 `register` / `people` / `wish` / `define` / `promise`，
-五個操作 `sub` / `add` / `widen` / `kill` / `revive`，
-以及承諾裡用的 `granted` / `alive` / `self` / `not` / `and` / `or` / `implies`。
+現在的語言認得 `register` / `attribute` / `people` / `wish` / `define` / `promise`，
+六個操作 `sub` / `add` / `widen` / `set` / `kill` / `revive`，
+精靈政策裡的 `concept`，以及承諾裡用的 `granted` / `alive` / `self` / `not` / `and` / `or` / `implies`。
 語法一律 ASCII，不用打數學符號。
