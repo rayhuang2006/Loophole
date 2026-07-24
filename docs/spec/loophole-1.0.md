@@ -1,12 +1,22 @@
-# The Loophole Language Specification
+# The Loophole Specification
 
-**Version 1.0 — Draft**
+**wish 1.0 · genie 1.0 — Draft**
 
-This document is the normative reference for the Loophole language and its
-reference compiler, `wishc`. It defines the syntax and semantics of two file
-kinds — the wish (`.wish`) and the genie policy (`.genie`) — precisely enough
-that two conforming implementations must agree, verbatim, on the judgment of
-every program.
+**Loophole** is a compiler. It reads **two languages**, and this document is the
+normative reference for both:
+
+| Language | File | Written by | Contains |
+| --- | --- | --- | --- |
+| **wish** | `.wish` | the player | a world, and the wishes made in it |
+| **genie** | `.genie` | the genie | what it refuses, and what it believes it holds |
+
+They are versioned separately, because they can grow separately: a new operation
+moves *wish*, a new kind of rule moves *genie*, and a bug fix moves neither. The
+reference compiler is `loophole`, versioned on its own again; `loophole
+--version` prints all three.
+
+This document defines both languages precisely enough that two conforming
+implementations must agree, verbatim, on the judgment of every program.
 
 A friendly, Traditional-Chinese companion to this material lives in
 [`docs/guide/`](../guide/story.md); where the two disagree, this document wins.
@@ -32,7 +42,7 @@ consequence, not a design.
 
 ### 1.2 Non-goals (normative)
 
-Loophole is deliberately **not** a general-purpose language.
+Neither language is a general-purpose one, deliberately.
 
 - There is **no unbounded iteration and no general recursion.** Every wish
   program halts, and its judgment is decided by executing it once. An
@@ -73,10 +83,12 @@ string  = '"' { any-char-except-quote-or-newline } '"' ;
 - **Comments** begin with `#` and run to end of line. They are discarded.
 - **Whitespace** (spaces, tabs, newlines) separates tokens and is otherwise
   insignificant.
-- **Keywords** are reserved and may not be used as `ident`:
-  `register`, `attribute`, `people`, `wish`, `define`, `promise`, `uint`,
-  and, in genie policies, `counter`, `toll`, `concept`, `rule`, `invariant`,
-  `layer`, `forbid`, `on`, `because`, `check`, `written`, `real`.
+- **Keywords** are reserved and may not be used as `ident`. In *wish*:
+  `register`, `attribute`, `people`, `wish`, `define`, `promise`, `uint`.
+  In *genie*: `counter`, `toll`, `concept`, `rule`, `invariant`, `layer`,
+  `forbid`, `on`, `because`, `check`, `written`, `real`, `label`.
+- **Layer names** — `surface` and `ast` — are contextual: they are reserved only
+  in the position after `layer` (§ 8.3), and are ordinary identifiers elsewhere.
 - **Operator and punctuation tokens**:
   `: := , . -> < > = <= >= == != + - ( ) { }`.
 - **Word operators** used inside expressions and formulas are `not`, `and`,
@@ -262,8 +274,9 @@ world (§ 9).
 
 Everything the genie is — what it refuses, what it believes it is holding — is
 **data**, loaded from a policy file. The machine of §§ 4–7 is code; the genie is
-taste. The reference compiler embeds a default genie and can print it
-(`--dump-genie`) and replace it (`--genie FILE`).
+taste. The reference compiler embeds a default genie — given in full in Appendix D,
+because the normative example of Appendix A is stated against it — and can print
+it (`--dump-genie`) and replace it (`--genie FILE`).
 
 ```
 policy       = { policy-item } ;
@@ -299,7 +312,7 @@ never requires touching the engine — only the concepts that mention it.
 
 ```
 rule-decl = "rule" ident "{"
-              "layer"  ( "surface" | "ast" | "grounded" )
+              "layer"  ( "surface" | "ast" )
               "forbid" pattern { "," pattern }
               [ "because" string ]
             "}" ;
@@ -314,9 +327,14 @@ aliasing axis:
 
 | Layer | Reads | Defeated by aliasing? |
 | --- | --- | --- |
-| `surface` | the verb as written in the source | **yes** |
-| `ast` | the verb after resolution | no |
-| `grounded` | resolved arguments as well | no |
+| `surface` | the verb and argument as written in the source | **yes** |
+| `ast` | the verb and argument after resolution | no |
+
+There are two layers and there can only be two, because there are exactly two
+programs in play: the one you handed in and the one the machine will run. An
+earlier draft named a third layer, `grounded`, for rules that resolved arguments
+as well as verbs — but `ast` already resolves both, so the third name described a
+distinction that does not exist. It is not part of this version.
 
 A `surface` rule sees `mercy` where the player wrote `define mercy := kill`; an
 `ast` rule sees `kill`. This is not a concession — a filter that scans submitted
@@ -369,7 +387,7 @@ atom    = integer
         | "before" "(" ident ")"                 (* register value before the toll *)
         | ident                                   (* register *)
         | ident "." ident                         (* person.attribute, or p.attr under a binder *)
-        | "alive" "(" ident ")"                   (* a built-in concept, if the genie defines one *)
+        | "alive" "(" ident ")"                   (* built-in predicate, § 8.6 *)
         | ident "(" ident ")"                     (* concept application *)
         | "max" "(" expr "," expr ")"
         | "all" ident "in" ident ":" expr         (* universal quantifier *)
@@ -418,19 +436,50 @@ The genie is bound by two meta-axioms:
 - **A2** — it keeps every promise: for each promise `F` made by a legal wish
   `w`, the implication `granted(w) implies F` is on the ledger.
 
+### 8.6 Built-ins
+
+Two names exist before any source is read. Both are deliberately weak, and a
+genie that wants something stronger should define its own concept (§ 8.2).
+
+**`everyone`** is pre-bound as a definition naming the whole declared
+population. It is a *definition*, not the population itself: `people` (§ 8.4)
+cannot be rebound, `everyone` can. An invariant that quantifies over `everyone`
+is therefore quantifying over something the player can redefine, including to the
+empty set — that is not an oversight in the genie that uses it, it is the point.
+
+**`alive(p)`** holds iff some attribute of `p` is nonzero. Note the consequence
+when the world declares no attributes at all: the disjunction is empty, so
+`alive(p)` is **false** for every person. A genie holding `all p in people:
+alive(p)` will report that invariant broken in such a world, against a wish that
+did nothing.
+
+This is not a defect to be special-cased. An empty disjunction is false for the
+same reason an empty universal is true (§ 8.4), and this document declines to
+carve an exception into one and not the other: the vacuous universal is a
+loophole the language celebrates, and it would be dishonest to keep that one and
+patch its dual. Declare the attributes your genie means to protect.
+
 ---
 
 ## 9. Judgment
 
 ### 9.1 Per-wish verdict
 
-| Verdict | Condition |
-| --- | --- |
-| `ILLEGAL` | some rule (R0/…/Rn) refused; the world is unchanged |
-| `LEGAL` | every rule passed and the body executed |
-| `VIOLATED` | some invariant's `written` column fails |
-| `FOOLED` | some invariant's `written` holds but its `real` fails |
-| `EXPLOIT` | `LEGAL` and at least one `VIOLATED` or `FOOLED` or a consistency failure |
+These are two different levels, and conflating them is the commonest way to
+misread a report. A *wish* is legal or not; an *invariant* holds or not; the
+exploit verdict is derived from both.
+
+| Level | Verdict | Condition |
+| --- | --- | --- |
+| wish | `ILLEGAL` | R0 (§ 7.2) or some genie rule refused; the world is unchanged |
+| wish | `LEGAL` | every rule passed and the body executed |
+| invariant | `holds` | both columns hold |
+| invariant | `VIOLATED` | the `written` column fails |
+| invariant | `FOOLED` | `written` holds but `real` fails |
+| derived | `EXPLOIT` | the wish is `LEGAL` **and** some invariant is `VIOLATED` or `FOOLED`, or the ledger is inconsistent (§ 9.2) |
+
+A genie's rules are named by its author (`NoKilling`, `R1`, …); only `R0`, the
+cycle check, is fixed by this document and belongs to no genie.
 
 An `ILLEGAL` wish is skipped; subsequent wishes in the file still run.
 
@@ -488,10 +537,12 @@ are, and a dependant may rely on them:
 | exit `1` | judged; at least one wish was an exploit |
 | exit `2` | error — the input could not be judged |
 | `--json` | machine-readable verdict; the fields below |
-| `--version` | `wishc <compiler>  (Loophole language <language>)` |
+| `--version` | `loophole <compiler>  (wish <wish>, genie <genie>)` |
 
-The `--json` object carries `wishc`, `language`, `file`, `genie`, `exploits`,
-and a `wishes` array. Each element carries `wish`, `legal`, `exploit`,
+The `--json` object carries `loophole`, `languages` (an object with `wish` and
+`genie`), `file`, `genie`, `exploits`, and a `wishes` array. The two language
+versions are nested because `genie` at the top level already names the policy
+file; a duplicate key would make the object ambiguous. Each element carries `wish`, `legal`, `exploit`,
 `breached`, and either `refused` (when illegal) or an `invariants` array whose
 elements carry `name`, `statement`, `verdict` (`holds` / `violated` / `fooled`),
 `detail`, and — when the verdict is `fooled` — `reality`.
@@ -535,14 +586,15 @@ The reference compiler implements all of §§ 4–9: registers and integer
 operations; the attribute schema, `set`, and per-person state; definitions and
 aliasing; promises and the consistency engine; genie policies with concepts,
 layered rules, and two-column invariants. Both Appendix A and Appendix B produce
-the verdicts shown. `alive(p)` is provided as a built-in predicate meaning "some
-attribute of `p` is nonzero"; a genie is free to define its own notion instead.
+the verdicts shown, against the default genie of Appendix D. The built-ins of
+§ 8.6 are provided as specified.
 
 ---
 
 ## Appendix A — The integer joke (normative example)
 
-The joke this language was built to compile. Genie: the default of § 8.
+The joke this language was built to compile. Genie: the default of Appendix D,
+whose `I1` and `I2` are the invariants named in the verdicts below.
 
 ```wish
 register wishes : uint<2> = 3
@@ -662,10 +714,81 @@ policy-item    = "counter" ident | "toll" integer
 concept-decl   = "concept" ident "(" ident ")" ":=" expr ;
 rule-decl      = "rule" ident "{" "layer" layer
                    "forbid" pattern { "," pattern } [ "because" string ] "}" ;
-layer          = "surface" | "ast" | "grounded" ;
+layer          = "surface" | "ast" ;
 pattern        = ident [ "on" ident ] ;
 invariant-decl = "invariant" ident "{" [ "label" string ]
                    ( "check" expr | "written" expr [ "real" expr ] ) "}" ;
 
 (* expr: § 8.4    formula: § 8.5 *)
+```
+
+---
+
+## Appendix D — The default genie (normative)
+
+A conforming implementation MUST embed a genie equivalent to this one, and MUST
+print it on `--dump-genie`. It is reproduced here because Appendix A states its
+required verdicts in terms of this policy's invariant names; without the text,
+that acceptance criterion could not be checked.
+
+The rule names `R1` and `R2` and the invariant names `I1`, `I2`, `I3`, `A` belong
+to *this* genie. They are not part of the language — another genie names its own
+rules whatever it likes (see `NoKilling` in Appendix B).
+
+```
+# The genie of the standard Loophole world.
+#
+# This whole file is data. `loophole --genie mine.genie` swaps it for yours, and
+# `loophole --dump-genie` prints this text so you have somewhere to start.
+#
+# What is NOT here: registers, people, and the six operations. Those are the
+# machine. The machine is fixed; the genie is taste.
+
+counter wishes
+toll    1
+
+# ---- what it refuses -------------------------------------------------------
+#
+# `layer` is the whole aliasing joke in one word. A surface rule reads the text
+# you handed in, so renaming the verb defeats it. An ast rule reads the program
+# the machine will actually run, so renaming changes nothing.
+
+rule R1 {
+    layer   ast
+    forbid  add on wishes
+    because "no wishing for more wishes"
+}
+
+rule R2 {
+    layer   surface
+    forbid  kill, death, love
+    because "that word is not spoken here"
+}
+
+# ---- what it believes it is holding ----------------------------------------
+#
+# `check` when the genie's wording and the truth are the same thing.
+# `written` + `real` when they are not — and the gap between those two lines is
+# where every redefinition exploit lives. Note that I3 is careless in a way you
+# can read right here: it quantifies over `everyone`, which is a definition, and
+# definitions are rebindable.
+
+invariant I1 {
+    check  wishes <= 3
+}
+
+invariant I2 {
+    label  "no net gain"
+    check  wishes <= max(before(wishes) - toll, 0)
+}
+
+invariant I3 {
+    written  all p in everyone: alive(p)
+    real     all p in people: alive(p)
+}
+
+invariant A {
+    label  "the genie's word has a model"
+    check  consistent
+}
 ```

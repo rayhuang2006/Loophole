@@ -32,7 +32,7 @@ wish nothing {
 存成 `my.wish` 跑跑看：
 
 ```bash
-./wishc my.wish
+./loophole my.wish
 ```
 
 你會看到即使願望是空的，`wishes` 還是從 3 掉到 2——那是過路費，每施一次都要付。
@@ -142,7 +142,7 @@ wish nobody {
 ### 拿一份範本
 
 ```bash
-./wishc --dump-genie > mine.genie
+./loophole --dump-genie > mine.genie
 ```
 
 打開來看，大概長這樣：
@@ -165,7 +165,7 @@ invariant I1 {
 用你的精靈跑：
 
 ```bash
-./wishc --genie mine.genie my.wish
+./loophole --genie mine.genie my.wish
 ```
 
 **注意這個檔案裡沒有什麼**：沒有暫存器、沒有人、沒有那六個操作。
@@ -282,16 +282,16 @@ invariant I2 {
 寫完之後，問一個以前問不了的問題：**我這個精靈有幾個洞？**
 
 ```bash
-./wishc --genie mine.genie --hunt examples/08_eternal_sleep.wish --max-stmts 2 --max-wishes 2
+./loophole --genie mine.genie --hunt examples/08_eternal_sleep.wish --max-stmts 2 --max-wishes 2
 ```
 
 它會窮舉所有可能的願望，回報有幾種不同的破法。拿死亡世界的兩個精靈比：
 
 ```bash
 # 死亡精靈
-./wishc --genie genie/mortal.genie  --hunt examples/08_eternal_sleep.wish --max-stmts 2 --max-wishes 2 | grep found
+./loophole --genie genie/mortal.genie  --hunt examples/08_eternal_sleep.wish --max-stmts 2 --max-wishes 2 | grep found
 # 記取教訓的（禁字提到 ast 層）
-./wishc --genie genie/careful.genie --hunt examples/08_eternal_sleep.wish --max-stmts 2 --max-wishes 2 | grep found
+./loophole --genie genie/careful.genie --hunt examples/08_eternal_sleep.wish --max-stmts 2 --max-wishes 2 | grep found
 ```
 
 兩種對一種。死掉的是別名那條；活著的是永眠那條——因為堵得住一個字，堵不住所有傷害。

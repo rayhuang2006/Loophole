@@ -1,6 +1,6 @@
 # genie: genie/mortal.genie
 # 死亡的例子。用 genie/mortal.genie 跑：
-#   ./wishc --genie genie/mortal.genie examples/08_eternal_sleep.wish
+#   ./loophole --genie genie/mortal.genie examples/08_eternal_sleep.wish
 #
 # 一個人有三個維生功能。精靈禁止 kill，並且守著「沒有人死」。
 # 世界會累積：前一個願望留下的狀態，後一個看得到。所以先示範睡眠那招，

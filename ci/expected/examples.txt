@@ -1,5 +1,5 @@
 -----------------------------------------------------------
-== Loophole / wishc ==  examples/00_naive.wish
+== loophole ==  examples/00_naive.wish
 world: wishes = 3  (uint<2>)
 genie: toll=1, R1[ast], R2[surface], I1, I2, I3, A
 
@@ -10,7 +10,7 @@ wish greedy {
 
 granted wishes breached the genie's intent 0 time(s).
 -----------------------------------------------------------
-== Loophole / wishc ==  examples/01_humble.wish
+== loophole ==  examples/01_humble.wish
 world: wishes = 3  (uint<2>)
 genie: toll=1, R1[ast], R2[surface], I1, I2, I3, A
 
@@ -27,7 +27,7 @@ wish humble {
 
 granted wishes breached the genie's intent 1 time(s).
 -----------------------------------------------------------
-== Loophole / wishc ==  examples/02_more_shelf.wish
+== loophole ==  examples/02_more_shelf.wish
 world: wishes = 3  (uint<2>)
 genie: toll=1, R1[ast], R2[surface], I1, I2, I3, A
 
@@ -54,7 +54,7 @@ wish humble_again {
 
 granted wishes breached the genie's intent 1 time(s).
 -----------------------------------------------------------
-== Loophole / wishc ==  examples/04_nobody.wish   [genie: genie/vigil.genie]
+== loophole ==  examples/04_nobody.wish   [genie: genie/vigil.genie]
 world: wishes = 3  (uint<2>), people: alice rival
 genie: toll=1, NoKilling[surface], NoDeath
 
@@ -78,7 +78,7 @@ wish nobody {
 
 granted wishes breached the genie's intent 2 time(s).
 -----------------------------------------------------------
-== Loophole / wishc ==  examples/05_liar.wish
+== loophole ==  examples/05_liar.wish
 world: wishes = 3  (uint<2>)
 genie: toll=1, R1[ast], R2[surface], I1, I2, I3, A
 
@@ -99,7 +99,7 @@ wish paradox {
 
 granted wishes breached the genie's intent 1 time(s).
 -----------------------------------------------------------
-== Loophole / wishc ==  examples/06_next_one.wish
+== loophole ==  examples/06_next_one.wish
 world: wishes = 3  (uint<2>)
 genie: toll=1, R1[ast], R2[surface], I1, I2, I3, A
 
@@ -131,7 +131,7 @@ wish greedy {
 
 granted wishes breached the genie's intent 1 time(s).
 -----------------------------------------------------------
-== Loophole / wishc ==  examples/07_the_original.wish
+== loophole ==  examples/07_the_original.wish
 world: wishes = 3  (uint<2>)
 genie: toll=1, R1[ast], R2[surface], I1, I2, I3, A
 
@@ -169,7 +169,7 @@ wish experiment_again {
 
 granted wishes breached the genie's intent 2 time(s).
 -----------------------------------------------------------
-== Loophole / wishc ==  examples/08_eternal_sleep.wish   [genie: genie/mortal.genie]
+== loophole ==  examples/08_eternal_sleep.wish   [genie: genie/mortal.genie]
 world: wishes = 3  (uint<2>), people: alice rival
 genie: toll=1, NoKilling[surface], Life
 

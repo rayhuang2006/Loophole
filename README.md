@@ -16,7 +16,7 @@
 於是他許第二個願望——把格子換成 64 位元。這完全合規，他要的是容量不是願望。
 然後同一招再來一次。
 
-`wishc` 把這個笑話變成一個可以編譯的東西。上面那三個願望不是比喻，是一個檔案：
+`loophole` 把這個笑話變成一個可以編譯的東西。上面那三個願望不是比喻，是一個檔案：
 
 ```wish
 wish experiment      { sub   wishes, 3          }
@@ -25,7 +25,7 @@ wish experiment_again{ sub   wishes, 2          }
 ```
 
 ```
-$ ./wishc examples/07_the_original.wish
+$ ./loophole examples/07_the_original.wish
 
 wish experiment {
     toll:  wishes 3 -> 2
@@ -59,10 +59,26 @@ wish experiment_again {
 
 ```bash
 make
-./wishc examples/01_humble.wish
+./loophole examples/01_humble.wish
 make run                          # 跑過全部例子（自動帶對的精靈）
 make check                        # 回歸測試（CI 跑的就是這個）
 ```
+
+裝到 PATH 上之後就不用打 `./` 了：
+
+```bash
+sudo make install                       # 或 make install PREFIX=$HOME/.local
+loophole a.wish --genie mine.genie
+```
+
+**Loophole 是編譯器，它讀兩種語言：**
+
+| | 誰寫的 | 裡面有什麼 |
+| --- | --- | --- |
+| `.wish` | 許願的人 | 一個世界，和在裡面許的願望 |
+| `.genie` | 精靈 | 它禁什麼，以及它以為自己守著什麼 |
+
+兩種語言分開編版本號，因為它們會分開長：多一個操作動 wish，多一種規則動 genie。
 
 一個比一個歪：
 
@@ -90,7 +106,7 @@ make check                        # 回歸測試（CI 跑的就是這個）
 那我就不該是唯一想得到的人：
 
 ```bash
-./wishc --hunt examples/01_humble.wish
+./loophole --hunt examples/01_humble.wish
 ```
 
 它把界限內每一支願望程式都跑一遍，留下「合規卻拆穿」的那些，分類，
@@ -115,15 +131,15 @@ wish w4 { }
 它們住在一個你可以改的檔案：
 
 ```bash
-./wishc --dump-genie > mine.genie
-./wishc --genie mine.genie examples/01_humble.wish
+./loophole --dump-genie > mine.genie
+./loophole --genie mine.genie examples/01_humble.wish
 ```
 
 `genie/careful.genie` 是一個記取教訓的死亡精靈。規矩的**字面意思一個字都沒改**——
 一樣禁 kill，一樣守「沒有人死」——只把禁字檢查從「看你寫的字」提到「看展開後的程式」：
 
 ```
-$ ./wishc --genie genie/careful.genie examples/08_eternal_sleep.wish
+$ ./loophole --genie genie/careful.genie examples/08_eternal_sleep.wish
 
 wish tidy {
     STATUS:  ILLEGAL — NoKilling: wish invokes 'kill' —
@@ -154,17 +170,18 @@ wish tidy {
 
 ## 給工具用的介面
 
-散文報告是給人看的，措辭會變。**要拿 `wishc` 當依賴的話，用這兩個**——
+散文報告是給人看的，措辭會變。**要拿 `loophole` 當依賴的話，用這兩個**——
 它們是穩定的契約：
 
 ```bash
-./wishc --json examples/01_humble.wish     # 機器可讀的判決
-./wishc --version                          # wishc 1.0.1  (Loophole language 1.0)
+./loophole --json examples/01_humble.wish     # 機器可讀的判決
+./loophole --version                          # loophole 1.1.0  (wish 1.0, genie 1.0)
 ```
 
 ```json
 {
-  "wishc": "1.0.1", "language": "1.0",
+  "loophole": "1.1.0",
+  "languages": { "wish": "1.0", "genie": "1.0" },
   "wishes": [
     { "wish": "humble", "legal": true,
       "invariants": [ { "name": "I2", "verdict": "violated", "detail": "(wishes = 3, needs <= 2)" } ],
@@ -185,7 +202,7 @@ wish tidy {
 所以「這個精靈守得住嗎」可以直接寫成一行：
 
 ```bash
-./wishc --genie mine.genie --hunt w.wish && echo "滴水不漏"
+./loophole --genie mine.genie --hunt w.wish && echo "滴水不漏"
 ```
 
 ---
@@ -216,7 +233,8 @@ wish tidy {
 - **Phase 4** 精靈變成可載入的資料檔。**done**
 - **v1.0** 兩層世界模型：人的屬性 + 精靈用 `concept` 定義的死亡。**done**（規格見 [語言規格 1.0](docs/spec/loophole-1.0.md)）
 - **v1.0.0 發布** LICENSE、版本號、機器可讀輸出、離開碼契約、CI。**done**
-- **接下來** 瀏覽器 playground、解題站、VSCode 語法高亮。
+- **v1.1.0** 更名為 `loophole`、兩種語言各自編版本、`make install`、砍掉不存在的 `grounded` 層。**done**
+- **接下來** VSCode 語法高亮（`.wish` 和 `.genie` 各一份文法）、瀏覽器 playground、解題站。
 
 現在的語言認得 `register` / `attribute` / `people` / `wish` / `define` / `promise`，
 六個操作 `sub` / `add` / `widen` / `set` / `kill` / `revive`，

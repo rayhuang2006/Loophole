@@ -102,7 +102,7 @@ CTF 的洞是人手放的，玩法是「找出設計者藏在哪」。這個專�
 
 ## 這是什麼形狀的程式（以及不要往哪裡長）
 
-`wishc` 是編譯器嗎？**前半是，後半完全不是。** 這個區分會決定你去翻哪本書，所以值得寫下來。
+`loophole` 是編譯器嗎？**前半是，後半完全不是。** 這個區分會決定你去翻哪本書，所以值得寫下來。
 
 **前半是貨真價實的編譯器前端。** 手刻 lexer、遞迴下降 parser、AST、
 一個真正的語義分析 pass（R1 走的是 AST 節點，不是字串比對），加上名稱解析。
@@ -147,7 +147,7 @@ pass pipeline 是為了在 IR 上反覆改寫，而這裡根本沒有 IR。做�
 
 ### 名字
 
-`wishc`、「A compiler that proves your genie exploit is technically legal」——這個梗留著。
+`loophole`、「A compiler that proves your genie exploit is technically legal」——這個梗留著。
 「編譯器」在這裡是笑點，而且是準確的那種不準確：
 使用者感受到的就是「我寫一份原始碼，它判我過或不過」，那確實是編譯器給人的體驗。
 
@@ -229,7 +229,7 @@ enum class Layer { Surface, Ast, Grounded };   // 字面 / AST / 接地狀態
 而是程式碼裡的欄位。哪條規則會被哪條軸打穿，**架構自己講得出來**，
 不用靠人記得去對照文件。
 
-### 這三張表已經在 `wishc.cpp` 裡了
+### 這三張表已經在 `loophole.cpp` 裡了
 
 `OPS`、`RULES`、`INVARIANTS`。重構前後搜尋器的輸出逐字相同——
 44957 個候選、18964 個 exploit、六種形狀、每個最小見證和每種的數量都沒變。
@@ -273,7 +273,7 @@ enum class Layer { Surface, Ast, Grounded };   // 字面 / AST / 接地狀態
 ```
 fml.h / fml.cpp     公式、DPLL                    ~200 行，不依賴世界以外的東西
 world.h             狀態、Reg、Binding、Commitment
-wishc.cpp           lexer、parser、表、執行、報告
+loophole.cpp           lexer、parser、表、執行、報告
 hunt.cpp            搜尋器與正規化                 ~300 行
 ```
 
@@ -671,7 +671,7 @@ v1.0 換成屬性 + 概念的死亡模型之後，同樣的道理現在是 2→1
 - **`widen` 允許縮小要不要保留。** 目前保留（見 SEMANTICS）。
   留著就多一種招式，擋掉就名副其實。還沒決定哪個比較好笑。
 - **精靈的參數還寫死在程式裡。** Phase 3 要外部化成 policy 檔。
-- **WASM。** `wishc.cpp` 是單檔零依賴，`emcc` 幾乎可以原封不動編成 WebAssembly。
+- **WASM。** `loophole.cpp` 是單檔零依賴，`emcc` 幾乎可以原封不動編成 WebAssembly。
   同一份 kernel、位元層級相同的行為，跑在瀏覽器裡當 playground。
   嚴謹一分沒少，傳播力拿到——本機 binary 和網頁版之間本來就不是二選一。
   等 Phase 2 語言穩定再做。

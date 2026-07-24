@@ -21,7 +21,7 @@ compile_commands.json
 *.dll
 *.exe
 # the compiler binary, once built
-/wishc
+/loophole
 
 # Debug / profiling
 *.dSYM/

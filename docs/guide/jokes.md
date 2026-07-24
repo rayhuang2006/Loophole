@@ -250,7 +250,7 @@ A1 逼第一行成立，A2 逼它不成立。兩條路都走不通。
 
 **這一個跟前面全部都不是同一台機器。** 前面幾招都是「跑一遍看狀態」，
 這個問的是「這幾句話有沒有可能同時成立」——完全不同的問題，
-`wishc` 為它多裝了一台引擎（一個手刻的 DPLL，大約一百行）。
+`loophole` 為它多裝了一台引擎（一個手刻的 DPLL，大約一百行）。
 
 ---
 
@@ -311,7 +311,7 @@ wish w4 { }
 只把禁字檢查從看「你寫的字」（surface）改成看「展開後的程式」（ast）。
 
 ```bash
-./wishc --genie genie/careful.genie examples/08_eternal_sleep.wish
+./loophole --genie genie/careful.genie examples/08_eternal_sleep.wish
 ```
 ```
 wish tidy {
@@ -323,8 +323,8 @@ wish tidy {
 取小名沒有用了。用 `--hunt` 量給你看死掉的是哪一條：
 
 ```bash
-./wishc --genie genie/mortal.genie  --hunt examples/08_eternal_sleep.wish --max-stmts 2 --max-wishes 2 | grep found
-./wishc --genie genie/careful.genie --hunt examples/08_eternal_sleep.wish --max-stmts 2 --max-wishes 2 | grep found
+./loophole --genie genie/mortal.genie  --hunt examples/08_eternal_sleep.wish --max-stmts 2 --max-wishes 2 | grep found
+./loophole --genie genie/careful.genie --hunt examples/08_eternal_sleep.wish --max-stmts 2 --max-wishes 2 | grep found
 ```
 
 死亡精靈有**兩種**漏洞（別名殺人、永遠睡著），careful 只剩**一種**。

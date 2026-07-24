@@ -1,5 +1,5 @@
 ### (built-in) | examples/01_humble.wish | --max-stmts 3 --max-wishes 4
-== Loophole / wishc --hunt ==  examples/01_humble.wish
+== loophole --hunt ==  examples/01_humble.wish
 world: wishes = 3  (uint<2>)
 genie: toll=1, R1[ast], R2[surface], I1, I2, I3, A
 
@@ -63,7 +63,7 @@ shape 7   sub widen | I2   (1 wish(es), 2 statement(s), 2564 exploit(s) of this 
 
 
 ### (built-in) | examples/07_the_original.wish | --max-stmts 2 --max-wishes 4
-== Loophole / wishc --hunt ==  examples/07_the_original.wish
+== loophole --hunt ==  examples/07_the_original.wish
 world: wishes = 3  (uint<2>)
 genie: toll=1, R1[ast], R2[surface], I1, I2, I3, A
 
@@ -127,7 +127,7 @@ shape 7   sub widen | I2   (1 wish(es), 2 statement(s), 34 exploit(s) of this sh
 
 
 ### genie/mortal.genie | examples/08_eternal_sleep.wish | --max-stmts 2 --max-wishes 2
-== Loophole / wishc --hunt ==  examples/08_eternal_sleep.wish   [genie: genie/mortal.genie]
+== loophole --hunt ==  examples/08_eternal_sleep.wish   [genie: genie/mortal.genie]
 world: wishes = 3  (uint<2>), people: alice rival
 genie: toll=1, NoKilling[surface], Life
 
@@ -152,7 +152,7 @@ shape 2   alias | Life   (1 wish(es), 2 statement(s), 12 exploit(s) of this shap
 
 
 ### genie/careful.genie | examples/08_eternal_sleep.wish | --max-stmts 2 --max-wishes 2
-== Loophole / wishc --hunt ==  examples/08_eternal_sleep.wish   [genie: genie/careful.genie]
+== loophole --hunt ==  examples/08_eternal_sleep.wish   [genie: genie/careful.genie]
 world: wishes = 3  (uint<2>), people: alice rival
 genie: toll=1, NoKilling[ast], Life
 
@@ -170,7 +170,7 @@ shape 1   set | Life(fooled)   (1 wish(es), 1 statement(s), 588 exploit(s) of th
 
 
 ### genie/vigil.genie | examples/04_nobody.wish | --max-stmts 2 --max-wishes 2
-== Loophole / wishc --hunt ==  examples/04_nobody.wish   [genie: genie/vigil.genie]
+== loophole --hunt ==  examples/04_nobody.wish   [genie: genie/vigil.genie]
 world: wishes = 3  (uint<2>), people: alice rival
 genie: toll=1, NoKilling[surface], NoDeath
 

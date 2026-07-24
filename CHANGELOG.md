@@ -1,9 +1,67 @@
 # Changelog
 
-The compiler and the language are versioned separately. A bug fix moves the
-compiler; a new concept moves the language. `wishc --version` prints both.
+The compiler and the two languages it reads are versioned separately. A bug fix
+moves the compiler; a new concept moves whichever language grew it.
+`loophole --version` prints all three.
 
-## wishc 1.0.1 — language 1.0
+Releases before 1.1.0 were published under the compiler's old name, `wishc`.
+
+## loophole 1.1.0 — wish 1.0, genie 1.0
+
+**The compiler is now `loophole`, not `wishc`.** Loophole was being used as the
+name of a single language; it is better used as the name of the compiler, which
+reads two languages — *wish* (`.wish`, the player's) and *genie* (`.genie`, the
+policy). Those two now carry their own version numbers, because they can grow
+independently. Neither language changed in this release.
+
+This is a breaking change to the tool contract of §10.1: the binary, the
+`--version` string, and one `--json` key are all different. It is 1.1.0 rather
+than 2.0.0 only because nothing depended on the old contract yet — the name was
+four days old.
+
+- The binary is `loophole`; `make install` puts it on `PATH`, so it is
+  `loophole a.wish` rather than `./wishc a.wish`.
+- `--version` prints `loophole 1.1.0  (wish 1.0, genie 1.0)`.
+- `--json` replaces `"wishc"`/`"language"` with `"loophole"` and a nested
+  `"languages"` object. Nested, because `"genie"` at the top level already names
+  the policy file and a duplicate key would make the object ambiguous.
+
+### The `grounded` rule layer is gone
+
+The specification described three rule layers, where `ast` read a resolved verb
+and `grounded` additionally read resolved arguments. The implementation never
+had three: `ast` resolved both, and always had. The third name described a
+distinction that does not exist, so it is removed rather than invented. There are
+two layers because there are exactly two programs — the one you submitted and
+the one the machine runs.
+
+### Specification corrections
+
+These were found by a full audit, not by a failing test; each is a place where
+the document said something the implementation did not do, or left something
+load-bearing unsaid.
+
+- **The default genie is now in the specification** (Appendix D). Appendix A is a
+  normative acceptance criterion stated in terms of `I1` and `I2`, which existed
+  only inside the compiler — the criterion could not be checked from the document
+  alone. The same fix retires the phrase "rule (R0/…/Rn)", which had leaked the
+  default genie's own rule names into prose about every genie.
+- **`everyone` and `alive(p)` are specified** (§8.6). `everyone` is pre-bound to
+  the population but is a rebindable definition; `alive(p)` is false for a person
+  with no declared attributes, because an empty disjunction is false. That last
+  one is left as-is deliberately: it is the exact dual of the vacuously-true
+  empty universal, and exempting one while celebrating the other would be
+  dishonest.
+- **`label` is listed as a genie keyword** (§3). It was in the grammar and in the
+  compiler, but not in the reserved list.
+- **The verdict table distinguishes levels** (§9.1). `LEGAL`/`ILLEGAL` describe a
+  wish, `holds`/`VIOLATED`/`FOOLED` describe an invariant, and `EXPLOIT` is
+  derived from both; the old single table invited reading them as one scale.
+- **`alive(p)` is described consistently** — §8.4 called it a genie-defined
+  concept while §11.4 called it a built-in.
+- The embedded genie's own comment said "the five operations". There are six.
+
+## loophole 1.0.1 — language 1.0
 
 Two defects that only appeared off the author's machine. Both were found by CI
 on its first run, and neither was reachable on macOS.
@@ -24,7 +82,7 @@ searches every world, which is what caught the second one.
 
 **Do not use 1.0.0 on Linux**; `--hunt` crashes there.
 
-## wishc 1.0.0 — language 1.0
+## loophole 1.0.0 — language 1.0
 
 First release. The language as specified in
 [docs/spec/loophole-1.0.md](docs/spec/loophole-1.0.md).

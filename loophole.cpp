@@ -1,4 +1,9 @@
-// wishc — the Loophole wish compiler
+// loophole — the compiler for the wish and genie languages
+//
+// It reads two languages. A `.wish` is what the player asks for: a world, and
+// the wishes made in it. A `.genie` is the policy the wish is judged against:
+// what the genie refuses, and what it believes it is holding. Both are data;
+// the machine between them is fixed.
 //
 // Pipeline:  source (.wish) -> lexer -> parser -> AST
 //                           -> R2 scans the SURFACE text (before expansion)
@@ -34,9 +39,10 @@
 // this program could have.
 // ---------------------------------------------------------------------------
 //
-// Build:  g++ -std=c++17 -O2 -Wall wishc.cpp -o wishc
-// Run:    ./wishc examples/01_humble.wish
-//         ./wishc --hunt examples/01_humble.wish
+// Build:  g++ -std=c++17 -O2 -Wall loophole.cpp -o loophole
+// Run:    ./loophole examples/01_humble.wish
+//         ./loophole --genie genie/mortal.genie examples/08_eternal_sleep.wish
+//         ./loophole --hunt examples/01_humble.wish
 
 #include <algorithm>
 #include <cstdint>
@@ -53,12 +59,14 @@
 #include <vector>
 
 // ---------------------------------------------------------------------------
-// Version. The compiler and the language it implements are versioned
-// separately on purpose: a bug fix bumps the compiler, a new concept bumps the
-// language. Dependants (an editor plugin, a judge) pin against these.
+// Version. Loophole the compiler and the two languages it reads are versioned
+// separately on purpose: a bug fix bumps the compiler, a new concept bumps
+// whichever language grew it. Dependants (an editor plugin, a judge) pin
+// against these.
 // ---------------------------------------------------------------------------
-static const char* WISHC_VERSION    = "1.0.1";
-static const char* LANGUAGE_VERSION = "1.0";
+static const char* COMPILER_VERSION = "1.1.0";
+static const char* WISH_VERSION     = "1.0";
+static const char* GENIE_VERSION    = "1.0";
 
 // Minimal JSON string escaping. UTF-8 passes through untouched — JSON is
 // defined over Unicode, and the diagnostics are bilingual.
@@ -835,13 +843,17 @@ struct Parser {
 // Where a guard lives. This is not decoration: it says which exploit axis can
 // get past it. A Surface rule reads the text you handed in, so an alias defeats
 // it. An Ast rule reads the resolved program, so an alias does not.
-enum class Layer { Surface, Ast, Grounded };
+// Two layers, not three. An earlier draft had a `grounded` layer that was
+// supposed to resolve arguments as well as verbs — but `ast` already does that,
+// so the third name described a distinction that did not exist. Two is the
+// honest count, and it is also the whole joke: a rule either reads the text you
+// handed in, or it reads the program the machine will actually run.
+enum class Layer { Surface, Ast };
 
 static const char* layerName(Layer l) {
     switch (l) {
         case Layer::Surface:  return "surface";
         case Layer::Ast:      return "ast";
-        case Layer::Grounded: return "grounded";
     }
     return "?";
 }
@@ -1270,10 +1282,10 @@ static bool ruleRefuses(const PolicyRule& r, const Wish& w,
 // ---------------------------------------------------------------------------
 static const char* DEFAULT_GENIE = R"GENIE(# The genie of the standard Loophole world.
 #
-# This whole file is data. `wishc --genie mine.genie` swaps it for yours, and
-# `wishc --dump-genie` prints this text so you have somewhere to start.
+# This whole file is data. `loophole --genie mine.genie` swaps it for yours, and
+# `loophole --dump-genie` prints this text so you have somewhere to start.
 #
-# What is NOT here: registers, people, and the five operations. Those are the
+# What is NOT here: registers, people, and the six operations. Those are the
 # machine. The machine is fixed; the genie is taste.
 
 counter wishes
@@ -1487,10 +1499,9 @@ struct PolicyParser {
                 while (cur().kind != Tok::RBrace) {
                     if (word("layer")) {
                         p++;
-                        std::string l = name("surface / ast / grounded");
+                        std::string l = name("surface or ast");
                         if      (l == "surface")  r.layer = Layer::Surface;
                         else if (l == "ast")      r.layer = Layer::Ast;
-                        else if (l == "grounded") r.layer = Layer::Grounded;
                         else die("unknown layer '" + l + "'");
                     } else if (word("forbid")) {
                         p++;
@@ -2199,8 +2210,11 @@ static void emitWishJson(std::ostream& out, const Wish& w, const Outcome& o,
 static int runJson(std::ostream& out, const Program& prog, const Genie& genie,
                    World world, const char* path, const char* genie_path) {
     out << "{\n";
-    out << "  \"wishc\": \"" << WISHC_VERSION << "\",\n";
-    out << "  \"language\": \"" << LANGUAGE_VERSION << "\",\n";
+    // The two language versions are nested: "genie" already means the policy
+    // file at this level, and a duplicate key would make the object ambiguous.
+    out << "  \"loophole\": \"" << COMPILER_VERSION << "\",\n";
+    out << "  \"languages\": { \"wish\": \"" << WISH_VERSION
+        << "\", \"genie\": \"" << GENIE_VERSION << "\" },\n";
     out << "  \"file\": \"" << jsonEsc(path) << "\",\n";
     out << "  \"genie\": \"" << jsonEsc(genie_path ? genie_path : "(built-in)") << "\",\n";
     out << "  \"wishes\": [\n";
@@ -2222,9 +2236,9 @@ static int runJson(std::ostream& out, const Program& prog, const Genie& genie,
 // ---------------------------------------------------------------------------
 static void usage() {
     std::cerr <<
-        "usage: wishc [--genie FILE] [--json] <file.wish>\n"
-        "       wishc [--genie FILE] --hunt <file.wish> [--max-stmts N] [--max-wishes N] [--max-imm N]\n"
-        "       wishc --dump-genie | --version\n"
+        "usage: loophole [--genie FILE] [--json] <file.wish>\n"
+        "       loophole [--genie FILE] --hunt <file.wish> [--max-stmts N] [--max-wishes N] [--max-imm N]\n"
+        "       loophole --dump-genie | --version\n"
         "\n"
         "  --hunt        ignore the file's wishes; enumerate every wish program within\n"
         "                the bound and report the ones that are LEGAL yet BREACH.\n"
@@ -2248,8 +2262,9 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--version") {
-            std::cout << "wishc " << WISHC_VERSION
-                      << "  (Loophole language " << LANGUAGE_VERSION << ")\n";
+            std::cout << "loophole " << COMPILER_VERSION
+                      << "  (wish " << WISH_VERSION
+                      << ", genie " << GENIE_VERSION << ")\n";
             return 0;
         }
         else if (a == "--json") { as_json = true; }
@@ -2332,7 +2347,7 @@ int main(int argc, char** argv) {
 
     if (as_json && !hunt) return runJson(std::cout, prog, genie, world, path, genie_path);
 
-    std::cout << "== Loophole / wishc " << (hunt ? "--hunt ==  " : "==  ") << path;
+    std::cout << "== loophole " << (hunt ? "--hunt ==  " : "==  ") << path;
     if (genie_path) std::cout << "   [genie: " << genie_path << "]";
     std::cout << "\n";
     std::cout << "world: " << genie.counter << " = " << world.regs[genie.counter].val

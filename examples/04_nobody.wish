@@ -1,6 +1,6 @@
 # genie: genie/vigil.genie
 # 定義上的無人。用 genie/vigil.genie 跑：
-#   ./wishc --genie genie/vigil.genie examples/04_nobody.wish
+#   ./loophole --genie genie/vigil.genie examples/04_nobody.wish
 #
 # 精靈守著「所有人都不死」，但它把「所有人」寫成可重綁的 everyone。
 

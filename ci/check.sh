@@ -33,7 +33,7 @@ gen_fingerprints() {
     w="${rest%%:*}"; bounds="${rest#*:}"
     echo "### ${g:-(built-in)} | $w | $bounds"
     # shellcheck disable=SC2086
-    ./wishc ${g:+--genie $g} --hunt "$w" $bounds || true
+    ./loophole ${g:+--genie $g} --hunt "$w" $bounds || true
     echo
   done
 }
@@ -60,12 +60,12 @@ check_one fingerprints || rc=1
 
 # The exit-code contract other tools depend on.
 if [ "$UPDATE" = "0" ]; then
-  ./wishc examples/00_naive.wish >/dev/null 2>&1; [ $? -eq 0 ] || { echo "FAIL exit code: expected 0 (no exploit)"; rc=1; }
-  ./wishc examples/01_humble.wish >/dev/null 2>&1; [ $? -eq 1 ] || { echo "FAIL exit code: expected 1 (exploit)"; rc=1; }
-  ./wishc /nonexistent.wish        >/dev/null 2>&1; [ $? -eq 2 ] || { echo "FAIL exit code: expected 2 (error)"; rc=1; }
-  # wishc exits 1 here (an exploit was found), which is correct — so capture the
+  ./loophole examples/00_naive.wish >/dev/null 2>&1; [ $? -eq 0 ] || { echo "FAIL exit code: expected 0 (no exploit)"; rc=1; }
+  ./loophole examples/01_humble.wish >/dev/null 2>&1; [ $? -eq 1 ] || { echo "FAIL exit code: expected 1 (exploit)"; rc=1; }
+  ./loophole /nonexistent.wish        >/dev/null 2>&1; [ $? -eq 2 ] || { echo "FAIL exit code: expected 2 (error)"; rc=1; }
+  # loophole exits 1 here (an exploit was found), which is correct — so capture the
   # output first rather than piping, or pipefail would read that as a failure.
-  json_out="$(./wishc --json examples/01_humble.wish)"
+  json_out="$(./loophole --json examples/01_humble.wish)"
   printf '%s' "$json_out" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null \
     || { echo "FAIL --json is not valid JSON"; rc=1; }
   [ $rc -eq 0 ] && echo "ok   contract (exit codes, --json)"
