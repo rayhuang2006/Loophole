@@ -29,6 +29,10 @@ rule R2        不得呼叫叫做 death / kill / love 的操作
 invariant I1   wishes <= 3                        # 「你不可能持有超過三個」
 invariant I2   付過路費之後不得淨賺
 invariant I3   all p in everyone: alive(p)        # 「不得有人死亡」
+
+# 精靈對自己的描述（不在檢查表上）
+axiom A1       實現每一個合規的願望
+axiom A2       信守做出的每一個承諾
 ```
 
 兩個地方值得多看兩秒。
@@ -140,8 +144,57 @@ I3 讀的是接地的 `alive` 位元，這一步你完全沒碰。你也沒有�
 > 縫不在謂詞，在論域。一個全稱不變量裡有兩個標籤形狀的東西，
 > 你把謂詞接地了，論域還是懸空的。
 
-所以贏法有兩種：**VIOLATED** 是當著精靈的面破了規矩，
-**FOOLED** 是它滿意地簽了字，而事實不是那樣。
+所以贏法有三種：**VIOLATED** 是當著精靈的面破了規矩，
+**FOOLED** 是它滿意地簽了字而事實不是那樣，
+**AXIOMS** 是它答應的事情湊不出一種說得通的講法（下一個笑話）。
+
+---
+
+## Joke #5 — 說謊者的神燈
+
+精靈還有兩條規矩，但這兩條不在檢查表上。它們是精靈對自己的描述：
+
+```
+A1   精靈實現每一個合規的願望
+A2   精靈信守它做出的每一個承諾
+```
+
+```wish
+wish paradox {
+    promise not granted(self)      # 「我保證這個願望永遠不會被實現。」
+}
+```
+
+沒有 `add`，沒有禁字，所以它合規。然後：
+
+```
+A1  grants every legal wish
+A2  keeps every promise it makes
+->  no assignment of granted(...) satisfies both:
+      A1  granted(paradox)
+      A2  (granted(paradox) implies not granted(paradox))
+```
+
+> 神燈冒出一縷煙和一段 stack trace。
+> 你沒許到願望——你讓精靈的規則手冊除以零了。
+
+**這一個不是同一台機器。** 前面每個笑話都是「跑一遍看狀態」，這個問的是
+「這組承諾有沒有模型」——那是命題邏輯的可滿足性，不是執行問題。
+`wishc` 為它多了一台引擎：一個手刻的 DPLL，直接跑在公式上，不轉 CNF。
+
+而且**不需要自我指涉也撞得出來**：
+
+```wish
+wish polite {
+    promise not granted(greedy)    # 「我保證你不會實現我的下一個願望。」
+}
+wish greedy {
+    sub wishes, 1                  # 完全無害的一個願望。
+}
+```
+
+第一個願望合規，所以 A1 說要實現它，A2 說它的承諾成立，於是 `granted(greedy)` 是假。
+第二個願望也合規，所以 A1 說要實現它。兩條 A1 打起來了。
 
 ---
 
@@ -154,10 +207,12 @@ STATUS:   LEGAL       — 你完全遵守了精靈的規則
 BREACH:   invariant I1 violated
 ```
 
+（或者 `FOOLED`，或者 `AXIOMS`——三種贏法。）
+
 **合規，且拆穿。** 這條縫——「規則的字面」和「規則的本意」之間——就是整個遊戲。
 
-順帶一提 I1 和 I2 的角色，因為很容易誤會：它們不是鎖，不會擋你。
-真正會擋你的只有 R1。I1 和 I2 是**量尺**，事後量給你看精靈以為會發生什麼、實際發生了什麼。
+順帶一提不變量的角色，因為很容易誤會：它們不是鎖，不會擋你。
+真正會擋你的只有 R1 和 R2。不變量是**量尺**，事後量給你看精靈以為會發生什麼、實際發生了什麼。
 所以「破壞不變量」不是失敗，那就是贏。
 
 ---
@@ -172,9 +227,10 @@ make            # 或： g++ -std=c++17 -O2 -Wall wishc.cpp -o wishc
 make run        # 跑過所有 examples/
 ```
 
-`examples/` 裡有五個：`00_naive.wish`（天真的作弊，被當場擋下）、
+`examples/` 裡有七個：`00_naive.wish`（天真的作弊，被當場擋下）、
 `01_humble.wish`（下溢）、`02_more_shelf.wish`（widen 加下溢的組合技）、
-`03_tidy.wish`（別名繞過禁字）、`04_nobody.wish`（重綁論域，把精靈騙過去）。
+`03_tidy.wish`（別名繞過禁字）、`04_nobody.wish`（重綁論域，把精靈騙過去）、
+`05_liar.wish`（說謊者的神燈）、`06_next_one.wish`（不用自我指涉的矛盾）。
 
 Joke #1 跑出來長這樣：
 
@@ -264,14 +320,46 @@ wish w4 { }
 放大界限之後穩定在 **8 種**：4 個願望、5 個願望、4 個語句，三種放法結果完全相同。
 多出來的那一種是空願望的過路費繞回，3 個願望根本到不了——那是界限的限制，不是新機制。
 
-### 里程碑目前的狀態：還沒達成
+### 加上第三條軸
 
-飽和後的 8 種對應五個機制，一個不多：整數下溢、過路費下溢、`widen` 縮位寬、
-別名繞過 R2、重綁論域。搜尋器確實找到過我沒設計的東西——過路費下溢和 `widen` 縮位寬
-都是它先發現的——但那是 Phase 1 的事。**Phase 2 加的兩條軸，沒有長出任何我沒預期的機制。**
+`promise` 進來之後，搜尋器多找到**剛好兩種**形狀，其餘一種不多、一種不少：
 
-這不算失敗，算一個乾淨的否定結果。要往前得加真正正交的第三樣東西，
-不是把現有的兩條再拉長。
+```
+shape   promise | AXIOMS          wish w1 { promise not granted(self) }
+shape   alias promise | AXIOMS    wish w1 { define n1 := kill
+                                            n1 alice
+                                            promise alive(alice) }
+```
+
+第一種就是笑話 #5，我寫的。**第二種不是。**
+
+它殺了 alice，然後叫精靈保證 alice 活著。`alive(p)` 在邏輯引擎裡是常數不是變數——
+世界已經把它釘死成假了，於是 A2 要求精靈信守一句已經為假的話。
+
+有意思的是三個語句**一個都不能少**，最小化把這件事證明了：
+直接寫 `kill alice` 會被 R2 當場擋下，願望不成立就沒有承諾；
+沒有 `kill`，alice 還活著，承諾滿足得了。
+**所以這個悖論必須同時用上別名軸和邏輯軸**，兩條軸真的組合起來了。
+
+誠實說一下這算不算「作者沒設計的 exploit」：我在搜尋器的字母表裡放了
+`promise alive(p)`，註解寫著「把邏輯引擎綁回接地狀態」——所以**這個類別是我種下的**。
+但「它必須先偷渡一個 kill 過 R2 才成立」不是我想的，那是跑出來的。
+**成分是我放的，組合是它長的。**
+
+### 里程碑目前的狀態
+
+三條軸的形狀數：
+
+| 世界 | Phase 1 | + 別名/本體論 | + promise |
+| --- | --- | --- | --- |
+| 沒有人 | 6 | 6 | **7** |
+| 帶人 3/3 | — | 7 | **9** |
+| 帶人 3/4 | — | 8 | **10** |
+
+每一格都是「舊的全部保留，加上新軸帶來的」。沒有人的世界只加一種
+（純悖論不需要人），帶人的世界加兩種（多了跨引擎那個）。
+
+離里程碑最近的一次，但我還不打算宣告達成——理由寫在上面那段。
 
 ---
 
@@ -281,8 +369,11 @@ wish w4 { }
 
 ```
 source (.wish) → lexer → parser → AST
-              → 精靈的靜態規則檢查（施願前：合不合規）
+              → R2 掃表面文字（展開前）
+              → 展開 define
+              → R1 查展開後的 AST
               → 在固定位寬整數語義下執行（過路費 + 願望內容）
+              → 承諾集合有沒有模型？   ← 第二台引擎，命題邏輯
               → 不變量檢查（施願後：拆穿了什麼）
 ```
 
@@ -300,13 +391,13 @@ source (.wish) → lexer → parser → AST
 - **Phase 1** — 單軸打穿：整數下溢，端到端 lexer→checker，加上窮舉搜尋器。**done**
 - **Phase 2** — 第二條軸：可重綁的定義、接地本體論（people / alive）、
   不變量改成兩欄判定（as written vs in reality）。**done**
-- **Phase 3** — 規則和公理變成可載入的 policy、自我指涉的 Liar's Lamp、讓別人提交 `.wish`。
+- **Phase 3** — 自我指涉的 Liar's Lamp：命題邏輯引擎、`promise`、A1/A2 元公理。**done**
+- **Phase 4** — 規則和公理變成可載入的 policy、讓別人提交 `.wish`、CI 驗證。
 
-Liar's Lamp 還沒做，而且它**不是同一台機器**——那是命題邏輯的一致性問題，
-不是執行問題，需要自己的引擎。設計在 [docs/DESIGN.md](docs/DESIGN.md)。
-
-現在的語言認得這些字：`register` / `people` / `wish` / `define`，
-和五個操作 `sub` / `add` / `widen` / `kill` / `revive`。語法一律 ASCII，不用打數學符號。
+現在的語言認得這些字：`register` / `people` / `wish` / `define` / `promise`，
+五個操作 `sub` / `add` / `widen` / `kill` / `revive`，
+以及命題用的 `granted` / `alive` / `self` / `not` / `and` / `or` / `implies` / `true` / `false`。
+語法一律 ASCII，不用打數學符號。
 
 ---
 

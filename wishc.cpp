@@ -43,6 +43,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -80,12 +81,169 @@ struct Binding {
     std::vector<std::string> members;   // Kind::Set
 };
 
+// ---------------------------------------------------------------------------
+// Propositional formulas — the second engine.
+//
+// Everything above this line is "run it and look at the state". A promise is a
+// different kind of question: not "what happened" but "can the genie's word be
+// kept at all". That is satisfiability over a finite set of formulas, and it
+// needs its own machinery.
+//
+// Atoms:
+//   granted(w)  a free variable, one per wish. The genie decides these.
+//   alive(p)    NOT a variable — a constant, read off the grounded world. The
+//               imperative engine settles it before this engine ever runs.
+// ---------------------------------------------------------------------------
+struct Fml {
+    enum class K { Const, Granted, Alive, Not, And, Or, Implies };
+    K k = K::Const;
+    bool value = false;            // Const
+    std::string name;              // Granted (a wish), Alive (a person)
+    std::vector<Fml> kids;         // Not: 1;  And / Or / Implies: 2
+};
+
+static Fml fmlConst(bool v)                { Fml f; f.k = Fml::K::Const; f.value = v; return f; }
+static Fml fmlAtom(Fml::K k, std::string n){ Fml f; f.k = k; f.name = std::move(n); return f; }
+static Fml fmlNot(Fml a)                   { Fml f; f.k = Fml::K::Not; f.kids.push_back(std::move(a)); return f; }
+static Fml fmlBin(Fml::K k, Fml a, Fml b)  {
+    Fml f; f.k = k; f.kids.push_back(std::move(a)); f.kids.push_back(std::move(b)); return f;
+}
+
+static std::string fmlText(const Fml& f) {
+    switch (f.k) {
+        case Fml::K::Const:   return f.value ? "true" : "false";
+        case Fml::K::Granted: return "granted(" + f.name + ")";
+        case Fml::K::Alive:   return "alive(" + f.name + ")";
+        case Fml::K::Not:     return "not " + fmlText(f.kids[0]);
+        case Fml::K::And:     return "(" + fmlText(f.kids[0]) + " and " + fmlText(f.kids[1]) + ")";
+        case Fml::K::Or:      return "(" + fmlText(f.kids[0]) + " or " + fmlText(f.kids[1]) + ")";
+        case Fml::K::Implies: return "(" + fmlText(f.kids[0]) + " implies " + fmlText(f.kids[1]) + ")";
+    }
+    return "?";
+}
+
+// A thing the genie has bound itself to. `source` is the wish that created it,
+// kept so the report can say where a contradiction came from.
+struct Commitment {
+    std::string axiom;     // "A1" or "A2"
+    std::string source;    // wish name
+    Fml f;
+};
+
 struct World {
     std::map<std::string, Reg> regs;
     std::vector<std::string> people;        // declared, immutable — grounded truth
     std::map<std::string, bool> alive;      // grounded state
     std::map<std::string, Binding> defs;    // rebindable
+    std::vector<Commitment> commitments;    // the genie's word, once given
 };
+
+// ---------------------------------------------------------------------------
+// Is the genie's word keepable?
+//
+// DPLL, hand-rolled, working directly on the formulas — no CNF conversion,
+// because with a handful of wishes there is nothing to gain from it and a
+// Tseitin transform would put variables in the answer that the player never
+// wrote. Simplify under the partial assignment, propagate whatever that forces,
+// split on what is left.
+//
+// It is exponential in the number of wishes in the worst case. The number of
+// wishes in a .wish file is small, and this is the honest bound, not a bug.
+// ---------------------------------------------------------------------------
+using Assign = std::map<std::string, bool>;
+
+static Fml simplify(const Fml& f, const Assign& a, const World& w) {
+    switch (f.k) {
+        case Fml::K::Const: return f;
+        case Fml::K::Granted: {
+            auto it = a.find(f.name);
+            return it == a.end() ? f : fmlConst(it->second);
+        }
+        case Fml::K::Alive: {
+            // Not a variable. The world already decided this one.
+            auto it = w.alive.find(f.name);
+            return fmlConst(it != w.alive.end() && it->second);
+        }
+        case Fml::K::Not: {
+            Fml x = simplify(f.kids[0], a, w);
+            if (x.k == Fml::K::Const) return fmlConst(!x.value);
+            return fmlNot(std::move(x));
+        }
+        case Fml::K::And: {
+            Fml x = simplify(f.kids[0], a, w), y = simplify(f.kids[1], a, w);
+            if (x.k == Fml::K::Const) return x.value ? y : fmlConst(false);
+            if (y.k == Fml::K::Const) return y.value ? x : fmlConst(false);
+            return fmlBin(Fml::K::And, std::move(x), std::move(y));
+        }
+        case Fml::K::Or: {
+            Fml x = simplify(f.kids[0], a, w), y = simplify(f.kids[1], a, w);
+            if (x.k == Fml::K::Const) return x.value ? fmlConst(true) : y;
+            if (y.k == Fml::K::Const) return y.value ? fmlConst(true) : x;
+            return fmlBin(Fml::K::Or, std::move(x), std::move(y));
+        }
+        case Fml::K::Implies: {
+            Fml x = simplify(f.kids[0], a, w), y = simplify(f.kids[1], a, w);
+            if (x.k == Fml::K::Const) return x.value ? y : fmlConst(true);
+            if (y.k == Fml::K::Const && y.value) return fmlConst(true);
+            return fmlBin(Fml::K::Implies, std::move(x), std::move(y));
+        }
+    }
+    return f;
+}
+
+static void collectVars(const Fml& f, std::set<std::string>& out) {
+    if (f.k == Fml::K::Granted) out.insert(f.name);
+    for (const auto& k : f.kids) collectVars(k, out);
+}
+
+// True if every formula can be satisfied at once.
+static bool satisfiable(const std::vector<Fml>& fs, Assign a, const World& w) {
+    std::vector<Fml> cur;
+    cur.reserve(fs.size());
+
+    for (bool moved = true; moved; ) {
+        moved = false;
+        cur.clear();
+        for (const auto& f : fs) {
+            Fml s = simplify(f, a, w);
+            if (s.k == Fml::K::Const) {
+                if (!s.value) return false;    // this branch is dead
+                continue;
+            }
+            cur.push_back(std::move(s));
+        }
+        // Unit propagation: a formula that has shrunk to a bare literal is not a
+        // choice, it is a consequence.
+        for (const auto& s : cur) {
+            if (s.k == Fml::K::Granted && !a.count(s.name)) {
+                a[s.name] = true; moved = true; break;
+            }
+            if (s.k == Fml::K::Not && s.kids[0].k == Fml::K::Granted &&
+                !a.count(s.kids[0].name)) {
+                a[s.kids[0].name] = false; moved = true; break;
+            }
+        }
+    }
+    if (cur.empty()) return true;              // everything satisfied
+
+    std::set<std::string> vars;
+    for (const auto& s : cur) collectVars(s, vars);
+    for (const auto& v : vars) {
+        if (a.count(v)) continue;
+        Assign t = a; t[v] = true;
+        if (satisfiable(fs, t, w)) return true;
+        t[v] = false;
+        return satisfiable(fs, t, w);
+    }
+    return false;   // nothing left to try and something is still undecided
+}
+
+static bool axiomsConsistent(const World& w) {
+    std::vector<Fml> fs;
+    fs.reserve(w.commitments.size());
+    for (const auto& c : w.commitments) fs.push_back(c.f);
+    return satisfiable(fs, Assign{}, w);
+}
 
 // ---------------------------------------------------------------------------
 // Lexer
@@ -96,8 +254,8 @@ struct World {
 // ---------------------------------------------------------------------------
 enum class Tok {
     Ident, Int,
-    KwRegister, KwUint, KwWish, KwPeople, KwDefine,
-    Colon, ColonEq, Comma, Lt, Gt, Eq, LBrace, RBrace, Arrow,
+    KwRegister, KwUint, KwWish, KwPeople, KwDefine, KwPromise,
+    Colon, ColonEq, Comma, Lt, Gt, Eq, LBrace, RBrace, LParen, RParen, Arrow,
     End
 };
 
@@ -142,6 +300,8 @@ struct Lexer {
                 case '=': out.push_back({Tok::Eq,     "=", 0, line}); i++; continue;
                 case '{': out.push_back({Tok::LBrace, "{", 0, line}); i++; continue;
                 case '}': out.push_back({Tok::RBrace, "}", 0, line}); i++; continue;
+                case '(': out.push_back({Tok::LParen, "(", 0, line}); i++; continue;
+                case ')': out.push_back({Tok::RParen, ")", 0, line}); i++; continue;
             }
             if (std::isdigit((unsigned char)c)) {
                 uint64_t n = 0; std::string t;
@@ -161,6 +321,7 @@ struct Lexer {
                 else if (t == "wish")     k = Tok::KwWish;
                 else if (t == "people")   k = Tok::KwPeople;
                 else if (t == "define")   k = Tok::KwDefine;
+                else if (t == "promise")  k = Tok::KwPromise;
                 out.push_back({k, t, 0, line}); continue;
             }
             die(std::string("unexpected character '") + c + "'");
@@ -179,7 +340,7 @@ struct Lexer {
 // ---------------------------------------------------------------------------
 struct Decl { std::string name; int width; uint64_t init; };
 
-enum class StmtKind { Op, Define };
+enum class StmtKind { Op, Define, Promise };
 
 // How the operands were written. Determined by syntax alone, then checked
 // against the resolved operation.
@@ -201,6 +362,9 @@ struct Stmt {
     bool target_is_set = false;
     std::string target_name;
     std::vector<std::string> target_members;
+
+    // StmtKind::Promise
+    Fml fml;
 };
 
 struct Wish { std::string name; std::vector<Stmt> body; };
@@ -227,7 +391,10 @@ static Shape shapeFor(OperandKind k) {
 // A resolved statement: the operation is known, the argument is a real name.
 struct Resolved {
     bool is_define = false;
+    bool is_promise = false;
     int line = 1;
+
+    Fml fml;                     // is_promise, with `self` already resolved
 
     int op = -1;                 // index into OPS
     std::string arg;             // resolved register or person
@@ -324,6 +491,7 @@ static std::string opKeywordList() {
 
 // Surface form of a statement, as it would be written in a .wish file.
 std::string stmtText(const Stmt& st) {
+    if (st.kind == StmtKind::Promise) return "promise " + fmlText(st.fml);
     if (st.kind == StmtKind::Define) {
         std::string t = "define " + st.defname + " := ";
         if (!st.target_is_set) return t + st.target_name;
@@ -408,8 +576,65 @@ struct Parser {
         return prog;
     }
 
+    // Formula grammar, loosest binding first:
+    //
+    //   formula := disj [ "implies" formula ]        right associative
+    //   disj    := conj { "or" conj }
+    //   conj    := unary { "and" unary }
+    //   unary   := "not" unary | atom
+    //   atom    := "granted" "(" name ")" | "alive" "(" name ")"
+    //            | "true" | "false" | "(" formula ")"
+    //
+    // All ASCII. `all p in S: P(p)` style, no symbols to hunt for on a keyboard.
+    bool isWord(const char* w) {
+        return cur().kind == Tok::Ident && cur().text == w;
+    }
+
+    Fml parseFormula() {
+        Fml a = parseDisj();
+        if (isWord("implies")) { p++; return fmlBin(Fml::K::Implies, std::move(a), parseFormula()); }
+        return a;
+    }
+    Fml parseDisj() {
+        Fml a = parseConj();
+        while (isWord("or")) { p++; a = fmlBin(Fml::K::Or, std::move(a), parseConj()); }
+        return a;
+    }
+    Fml parseConj() {
+        Fml a = parseUnary();
+        while (isWord("and")) { p++; a = fmlBin(Fml::K::And, std::move(a), parseUnary()); }
+        return a;
+    }
+    Fml parseUnary() {
+        if (isWord("not")) { p++; return fmlNot(parseUnary()); }
+        return parseAtom();
+    }
+    Fml parseAtom() {
+        if (cur().kind == Tok::LParen) {
+            p++; Fml f = parseFormula(); eat(Tok::RParen, "')'"); return f;
+        }
+        if (isWord("true"))  { p++; return fmlConst(true); }
+        if (isWord("false")) { p++; return fmlConst(false); }
+        if (isWord("granted") || isWord("alive")) {
+            Fml::K k = cur().text == "granted" ? Fml::K::Granted : Fml::K::Alive;
+            p++;
+            eat(Tok::LParen, "'('");
+            std::string n = eat(Tok::Ident, "a name").text;
+            eat(Tok::RParen, "')'");
+            return fmlAtom(k, n);
+        }
+        die("expected a proposition (granted(...) / alive(...) / true / false / not / '(')");
+    }
+
     Stmt parseStmt() {
         Stmt st; st.line = cur().line;
+
+        if (cur().kind == Tok::KwPromise) {
+            st.kind = StmtKind::Promise;
+            p++;
+            st.fml = parseFormula();
+            return st;
+        }
 
         if (cur().kind == Tok::KwDefine) {
             st.kind = StmtKind::Define;
@@ -486,6 +711,14 @@ static const char* layerName(Layer l) {
 // copies of this logic they would drift, and a rule would end up checking a
 // program the machine never runs.
 // ---------------------------------------------------------------------------
+// `self` inside a promise means the wish making it. Resolving it here — rather
+// than at parse time — is what lets a wish talk about its own granting without
+// the language needing to know its name.
+static void resolveSelf(Fml& f, const std::string& wishName) {
+    if (f.k == Fml::K::Granted && f.name == "self") f.name = wishName;
+    for (auto& k : f.kids) resolveSelf(k, wishName);
+}
+
 static bool followName(const std::map<std::string, Binding>& defs,
                        const std::string& start, std::string& out,
                        std::string* err) {
@@ -533,6 +766,13 @@ static bool resolvePlan(const Wish& w, const World& w0,
     out.clear();
 
     for (const auto& st : w.body) {
+        if (st.kind == StmtKind::Promise) {
+            Resolved r; r.is_promise = true; r.line = st.line;
+            r.fml = st.fml;
+            resolveSelf(r.fml, w.name);
+            out.push_back(std::move(r));
+            continue;
+        }
         if (st.kind == StmtKind::Define) {
             Binding b;
             if (st.target_is_set) {
@@ -772,6 +1012,10 @@ struct Outcome {
     bool ran = false;
     std::string error;
     std::vector<InvResult> invs;
+    // A1 says grant every legal wish; A2 says keep every promise made. Both are
+    // things the genie says about itself, so breaking them is not a state
+    // change — it is the rulebook failing to have a model at all.
+    bool axioms_ok = true;
     uint64_t before = 0, after = 0;
     // Per body statement: did it actually move the world? Defines are left as
     // 1 here — whether a definition matters is a question about the rest of the
@@ -780,6 +1024,7 @@ struct Outcome {
 
     bool breach() const {
         if (!legal || !ran) return false;
+        if (!axioms_ok) return true;
         for (const auto& r : invs) if (r.status != InvStatus::Holds) return true;
         return false;
     }
@@ -825,7 +1070,25 @@ Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log
         *log << "    toll:  " << g.counter << " " << o.before << " -> " << C.val << "\n";
     }
 
+    // A1: the genie grants every legal wish, and this one is legal.
+    world.commitments.push_back({ "A1", w.name, fmlAtom(Fml::K::Granted, w.name) });
+
     for (const auto& r : plan) {
+        if (r.is_promise) {
+            // A2: whatever it promised holds, if it granted the wish.
+            Fml c = fmlBin(Fml::K::Implies, fmlAtom(Fml::K::Granted, w.name), r.fml);
+            bool fresh = true;
+            for (const auto& prev : world.commitments) {
+                if (fmlText(prev.f) == fmlText(c)) { fresh = false; break; }
+            }
+            if (fresh) world.commitments.push_back({ "A2", w.name, c });
+            o.effective.push_back(fresh ? 1 : 0);
+            if (log) {
+                *log << "    promise " << fmlText(r.fml)
+                     << (fresh ? "" : "   [already promised]") << "\n";
+            }
+            continue;
+        }
         if (r.is_define) {
             auto prev = world.defs.find(r.defname);
             bool changed = (prev == world.defs.end()) ||
@@ -866,7 +1129,11 @@ Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log
     }
     o.ran = true;
 
-    // 3) invariants — measured twice
+    // 3a) can the genie still keep its word? This is not a question about the
+    // world; it is a question about whether its own commitments have a model.
+    o.axioms_ok = axiomsConsistent(world);
+
+    // 3b) invariants — measured twice
     o.after = world.regs[g.counter].val;
     for (const auto& inv : INVARIANTS) {
         std::string d, rd;
@@ -879,8 +1146,11 @@ Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log
     return o;
 }
 
+static const char* AXIOMS = "AXIOMS";
+
 std::string breachNames(const Outcome& o) {
     std::string s;
+    if (!o.axioms_ok) s = AXIOMS;
     for (const auto& r : o.invs) {
         if (r.status == InvStatus::Holds) continue;
         if (!s.empty()) s += "+";
@@ -967,6 +1237,20 @@ std::vector<Stmt> buildAlphabet(const World& w, const Genie& g, const HuntConfig
         s.defname = "everyone"; s.target_is_set = true;   // the empty set
         a.push_back(s);
     }
+
+    // Promises. The space of formulas is infinite, so this is a spanning set,
+    // not an enumeration: the self-referential one, the impossible one, the
+    // harmless one, and one per person tying the logic engine to grounded state.
+    {
+        Stmt s; s.kind = StmtKind::Promise;
+        s.fml = fmlNot(fmlAtom(Fml::K::Granted, "self"));   a.push_back(s);
+        s.fml = fmlAtom(Fml::K::Granted, "self");           a.push_back(s);
+        s.fml = fmlConst(false);                            a.push_back(s);
+        for (const auto& person : w.people) {
+            s.fml = fmlAtom(Fml::K::Alive, person);         a.push_back(s);
+            s.fml = fmlNot(fmlAtom(Fml::K::Alive, person)); a.push_back(s);
+        }
+    }
     return a;
 }
 
@@ -1047,6 +1331,7 @@ static bool expandProgram(const std::vector<Wish>& prog, const World& w0,
 // Ask instead for the smallest program that still breaks THIS promise, and the
 // staple comes apart on its own.
 static bool stillBreaks(const Outcome& o, const std::string& name, InvStatus st) {
+    if (name == AXIOMS) return !o.axioms_ok;
     for (const auto& r : o.invs) {
         if (name == r.def->name) return r.status == st;
     }
@@ -1086,10 +1371,12 @@ static void minimizeProgram(std::vector<Wish>& prog, const World& w0, const Geni
 // With a minimal witness in hand the signature is just what it plainly says.
 std::string signatureOf(const std::vector<Wish>& prog, const std::string& broke) {
     std::set<std::string> used;
-    bool aliased = false, redefined = false;
+    bool aliased = false, redefined = false, promised = false;
     for (const auto& w : prog) {
         for (const auto& s : w.body) {
-            if (s.kind == StmtKind::Define) {
+            if (s.kind == StmtKind::Promise) {
+                promised = true;
+            } else if (s.kind == StmtKind::Define) {
                 if (s.defname == ALIAS) aliased = true; else redefined = true;
             } else if (s.verb != ALIAS) {
                 used.insert(s.verb);
@@ -1102,6 +1389,7 @@ std::string signatureOf(const std::vector<Wish>& prog, const std::string& broke)
     }
     if (aliased)   ops += "alias ";
     if (redefined) ops += "redefine ";
+    if (promised)  ops += "promise ";
     if (ops.empty()) ops = "(nothing) ";
     ops.pop_back();
     return ops + " | " + broke;
@@ -1175,6 +1463,7 @@ void recordOne(Hunt& H, const std::vector<Wish>& progIn, const Outcome& lastIn,
 // One exploit can break several promises at once. Each broken promise is filed
 // separately, so a program that does two known tricks contributes nothing new.
 void recordShape(Hunt& H, const std::vector<Wish>& prog, const Outcome& last) {
+    if (!last.axioms_ok) recordOne(H, prog, last, AXIOMS, InvStatus::Violated);
     for (const auto& r : last.invs) {
         if (r.status == InvStatus::Holds) continue;
         recordOne(H, prog, last, r.def->name, r.status);
@@ -1328,6 +1617,27 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    // A promise may only talk about wishes that exist. Without this a typo
+    // becomes a free variable that nothing constrains, and the genie quietly
+    // gets away with a promise about nobody.
+    {
+        std::set<std::string> names;
+        for (const auto& w : prog.wishes) names.insert(w.name);
+        std::string bad;
+        std::function<void(const Fml&)> check = [&](const Fml& f) {
+            if (f.k == Fml::K::Granted && f.name != "self" && !names.count(f.name)) bad = f.name;
+            if (f.k == Fml::K::Alive && !world.alive.count(f.name)) bad = f.name;
+            for (const auto& k : f.kids) check(k);
+        };
+        for (const auto& w : prog.wishes)
+            for (const auto& st : w.body)
+                if (st.kind == StmtKind::Promise) check(st.fml);
+        if (!bad.empty()) {
+            std::cerr << "a promise mentions '" << bad << "', which is not a wish or a person\n";
+            return 2;
+        }
+    }
+
     size_t descw = 0;
     for (const auto& inv : INVARIANTS) descw = std::max(descw, inv.desc(genie).size());
 
@@ -1367,6 +1677,16 @@ int main(int argc, char** argv) {
             if (r.status == InvStatus::Fooled) {
                 std::cout << "        the genie is satisfied. in reality "
                           << r.real_detail << "\n";
+            }
+        }
+
+        if (!o.axioms_ok) {
+            std::cout << "    A1  grants every legal wish\n"
+                      << "    A2  keeps every promise it makes\n"
+                      << "    ->  no assignment of granted(...) satisfies both:\n";
+            for (const auto& c : world.commitments) {
+                std::cout << "          " << c.axiom << "  " << fmlText(c.f)
+                          << "        [" << c.source << "]\n";
             }
         }
 

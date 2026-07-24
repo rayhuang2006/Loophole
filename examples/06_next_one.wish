@@ -1,0 +1,12 @@
+# 同一台引擎，不用自我指涉也能撞出矛盾。
+# 你談的不是自己，是別人。
+
+register wishes : uint<2> = 3
+
+wish polite {
+    promise not granted(greedy)    # 「我保證你不會實現我的下一個願望。」
+}
+
+wish greedy {
+    sub wishes, 1                  # 完全無害的一個願望。
+}

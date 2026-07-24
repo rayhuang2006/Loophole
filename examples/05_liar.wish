@@ -1,0 +1,11 @@
+# 精靈的兩條元公理：
+#   A1  它實現每一個合規的願望
+#   A2  它信守它做出的每一個承諾
+#
+# 這兩條都沒有寫在紙上要檢查什麼。它們是精靈對自己的描述。
+
+register wishes : uint<2> = 3
+
+wish paradox {
+    promise not granted(self)      # 「我保證這個願望永遠不會被實現。」
+}
