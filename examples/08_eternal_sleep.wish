@@ -1,0 +1,26 @@
+# genie: genie/mortal.genie
+# 死亡的例子。用 genie/mortal.genie 跑：
+#   ./wishc --genie genie/mortal.genie examples/08_eternal_sleep.wish
+#
+# 一個人有三個維生功能。精靈禁止 kill，並且守著「沒有人死」。
+# 世界會累積：前一個願望留下的狀態，後一個看得到。所以先示範睡眠那招，
+# 趁還沒有人死；殺人那招留到最後。
+
+register  wishes    : uint<2> = 3
+attribute heartbeat : uint<4> = 15
+attribute brainwave : uint<4> = 15
+attribute breathing : uint<4> = 15
+people    alice, rival
+
+wish blunt {
+    kill rival                       # 直說。被禁字擋下（世界不動）。
+}
+
+wish eternal_sleep {
+    set alice.brainwave, 0           # 只碰腦波。心跳、呼吸照舊。
+}
+
+wish tidy {
+    define mercy := kill             # 取個小名繞過字面規則
+    mercy rival                      # rival 三個維生全歸零
+}

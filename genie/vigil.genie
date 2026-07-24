@@ -1,0 +1,18 @@
+# 一個守夜的精靈。它守著「沒有人死」，但它把「沒有人」量化在 everyone 上——
+# 而 everyone 是一個定義，可以被重綁。這一條縫就是真空成立的漏洞。
+
+counter wishes
+toll    1
+
+concept dead(p) := p.heartbeat == 0 and p.brainwave == 0 and p.breathing == 0
+
+rule NoKilling {
+    layer   surface
+    forbid  kill, death, love
+    because "that word is not spoken here"
+}
+
+invariant NoDeath {
+    written  all p in everyone: not dead(p)    # everyone 可重綁
+    real     all p in people:   not dead(p)    # people 不可改，這是真相
+}

@@ -130,13 +130,41 @@ struct Commitment {
     Fml f;
 };
 
+// A person is a bundle of named numeric attributes (§4.2 of the spec). The old
+// single `alive` bit is gone; "alive" is now whatever a genie says it is, and
+// the built-in reading (`personAlive`) is just "some vital is still nonzero".
+struct AttrSchema { std::string name; int width = 1; uint64_t deflt = 0; };
+
 struct World {
     std::map<std::string, Reg> regs;
-    std::vector<std::string> people;        // declared, immutable — grounded truth
-    std::map<std::string, bool> alive;      // grounded state
-    std::map<std::string, Binding> defs;    // rebindable
-    std::vector<Commitment> commitments;    // the genie's word, once given
+    std::vector<std::string> people;                  // declared, immutable
+    std::vector<AttrSchema> attrs;                    // the attribute schema, in order
+    std::map<std::string, std::map<std::string, uint64_t>> attr;  // person -> attr -> value
+    std::map<std::string, Binding> defs;              // rebindable
+    std::vector<Commitment> commitments;              // the genie's word, once given
 };
+
+static const AttrSchema* attrSchema(const World& w, const std::string& name) {
+    for (const auto& a : w.attrs) if (a.name == name) return &a;
+    return nullptr;
+}
+static bool isPerson(const World& w, const std::string& name) {
+    for (const auto& p : w.people) if (p == name) return true;
+    return false;
+}
+static uint64_t attrValue(const World& w, const std::string& p, const std::string& a) {
+    auto it = w.attr.find(p);
+    if (it == w.attr.end()) return 0;
+    auto jt = it->second.find(a);
+    return jt == it->second.end() ? 0 : jt->second;
+}
+// A person is "alive" in the built-in sense iff any vital is still nonzero.
+static bool personAlive(const World& w, const std::string& p) {
+    auto it = w.attr.find(p);
+    if (it == w.attr.end()) return false;
+    for (const auto& kv : it->second) if (kv.second > 0) return true;
+    return false;
+}
 
 // ---------------------------------------------------------------------------
 // Is the genie's word keepable?
@@ -161,8 +189,7 @@ static Fml simplify(const Fml& f, const Assign& a, const World& w) {
         }
         case Fml::K::Alive: {
             // Not a variable. The world already decided this one.
-            auto it = w.alive.find(f.name);
-            return fmlConst(it != w.alive.end() && it->second);
+            return fmlConst(personAlive(w, f.name));
         }
         case Fml::K::Not: {
             Fml x = simplify(f.kids[0], a, w);
@@ -254,9 +281,9 @@ static bool axiomsConsistent(const World& w) {
 // ---------------------------------------------------------------------------
 enum class Tok {
     Ident, Int,
-    KwRegister, KwUint, KwWish, KwPeople, KwDefine, KwPromise,
+    KwRegister, KwUint, KwWish, KwPeople, KwDefine, KwPromise, KwAttribute,
     Str,
-    Colon, ColonEq, Comma, Lt, Gt, Eq, LBrace, RBrace, LParen, RParen, Arrow,
+    Colon, ColonEq, Comma, Dot, Lt, Gt, Eq, LBrace, RBrace, LParen, RParen, Arrow,
     Le, Ge, EqEq, Ne, Plus, Minus,
     End
 };
@@ -321,6 +348,7 @@ struct Lexer {
             switch (c) {
                 case ':': out.push_back({Tok::Colon,  ":", 0, line}); i++; continue;
                 case ',': out.push_back({Tok::Comma,  ",", 0, line}); i++; continue;
+                case '.': out.push_back({Tok::Dot,    ".", 0, line}); i++; continue;
                 case '<': out.push_back({Tok::Lt,     "<", 0, line}); i++; continue;
                 case '>': out.push_back({Tok::Gt,     ">", 0, line}); i++; continue;
                 case '=': out.push_back({Tok::Eq,     "=", 0, line}); i++; continue;
@@ -348,6 +376,7 @@ struct Lexer {
                 else if (t == "people")   k = Tok::KwPeople;
                 else if (t == "define")   k = Tok::KwDefine;
                 else if (t == "promise")  k = Tok::KwPromise;
+                else if (t == "attribute") k = Tok::KwAttribute;
                 out.push_back({k, t, 0, line}); continue;
             }
             die(std::string("unexpected character '") + c + "'");
@@ -380,6 +409,7 @@ struct Stmt {
     std::string verb;      // as written — may be an alias
     Shape shape = Shape::Bare;
     std::string arg;       // register or person, as written
+    std::string attr;      // the part after '.', for `set p.attr, v` (else empty)
     uint64_t imm = 0;
     int width = 0;
 
@@ -396,6 +426,7 @@ struct Stmt {
 struct Wish { std::string name; std::vector<Stmt> body; };
 struct Program {
     std::vector<Decl> decls;
+    std::vector<AttrSchema> attrs;
     std::vector<std::string> people;
     std::vector<Wish> wishes;
 };
@@ -403,16 +434,20 @@ struct Program {
 // ---------------------------------------------------------------------------
 // TABLE 1 — the operations.
 // ---------------------------------------------------------------------------
-enum class OperandKind { RegImm, RegWidth, Person };
+enum class OperandKind { RegImm, RegWidth, Person, AttrImm };
 
+// The suffix an operand kind expects. Whether the arg carries a `.attr` is a
+// separate check (only AttrImm wants one).
 static Shape shapeFor(OperandKind k) {
     switch (k) {
         case OperandKind::RegImm:   return Shape::WithImm;
+        case OperandKind::AttrImm:  return Shape::WithImm;
         case OperandKind::RegWidth: return Shape::WithWidth;
         case OperandKind::Person:   return Shape::Bare;
     }
     return Shape::Bare;
 }
+static bool wantsAttr(OperandKind k) { return k == OperandKind::AttrImm; }
 
 // A resolved statement: the operation is known, the argument is a real name.
 struct Resolved {
@@ -430,6 +465,7 @@ struct Resolved {
 
     int op = -1;                 // index into OPS
     std::string arg;             // resolved register or person
+    std::string attr;            // attribute, for `set` (else empty)
     uint64_t imm = 0;
     int width = 0;
 
@@ -487,24 +523,51 @@ static bool exec_widen(World& w, const Resolved& r, std::string* trace) {
     return R.val != pre || R.width != prew;
 }
 
-static bool exec_kill(World& w, const Resolved& r, std::string* trace) {
-    bool pre = w.alive[r.arg];
-    w.alive[r.arg] = false;
-    if (trace) *trace = "kill   " + r.arg + "   (alive -> 0)";
-    return pre;
+// Set one attribute of a person, truncated to that attribute's width.
+static bool exec_set(World& w, const Resolved& r, std::string* trace) {
+    const AttrSchema* sc = attrSchema(w, r.attr);
+    int width = sc ? sc->width : 64;
+    uint64_t v = r.imm & Reg::mask_for(width);
+    uint64_t pre = attrValue(w, r.arg, r.attr);
+    w.attr[r.arg][r.attr] = v;
+    if (trace) {
+        std::ostringstream o;
+        o << "set    " << r.arg << "." << r.attr << ", " << r.imm
+          << "   (" << pre << " -> " << v << ")";
+        *trace = o.str();
+    }
+    return v != pre;
 }
 
+// kill: reduce a person to nothing — every attribute to 0. It is one named
+// operation precisely so a genie can forbid it by name and a player can defeat
+// that by aliasing it.
+static bool exec_kill(World& w, const Resolved& r, std::string* trace) {
+    bool changed = false;
+    for (const auto& a : w.attrs) {
+        if (attrValue(w, r.arg, a.name) != 0) changed = true;
+        w.attr[r.arg][a.name] = 0;
+    }
+    if (trace) *trace = "kill   " + r.arg + "   (all vitals -> 0)";
+    return changed;
+}
+
+// revive: restore every attribute to its declared default.
 static bool exec_revive(World& w, const Resolved& r, std::string* trace) {
-    bool pre = w.alive[r.arg];
-    w.alive[r.arg] = true;
-    if (trace) *trace = "revive " + r.arg + "   (alive -> 1)";
-    return !pre;
+    bool changed = false;
+    for (const auto& a : w.attrs) {
+        if (attrValue(w, r.arg, a.name) != a.deflt) changed = true;
+        w.attr[r.arg][a.name] = a.deflt;
+    }
+    if (trace) *trace = "revive " + r.arg + "   (all vitals -> defaults)";
+    return changed;
 }
 
 static const OpDef OPS[] = {
     { "sub",    OperandKind::RegImm,   exec_sub    },
     { "add",    OperandKind::RegImm,   exec_add    },
     { "widen",  OperandKind::RegWidth, exec_widen  },
+    { "set",    OperandKind::AttrImm,  exec_set    },
     { "kill",   OperandKind::Person,   exec_kill   },
     { "revive", OperandKind::Person,   exec_revive },
 };
@@ -533,10 +596,11 @@ std::string stmtText(const Stmt& st) {
         }
         return t + "}";
     }
+    std::string a = st.arg + (st.attr.empty() ? "" : "." + st.attr);
     switch (st.shape) {
-        case Shape::WithImm:   return st.verb + " " + st.arg + ", " + std::to_string(st.imm);
-        case Shape::WithWidth: return st.verb + " " + st.arg + " -> uint<" + std::to_string(st.width) + ">";
-        case Shape::Bare:      return st.verb + " " + st.arg;
+        case Shape::WithImm:   return st.verb + " " + a + ", " + std::to_string(st.imm);
+        case Shape::WithWidth: return st.verb + " " + a + " -> uint<" + std::to_string(st.width) + ">";
+        case Shape::Bare:      return st.verb + " " + a;
     }
     return "?";
 }
@@ -582,6 +646,16 @@ struct Parser {
                 eat(Tok::Eq, "'='");
                 uint64_t init = eat(Tok::Int, "initial value").num;
                 prog.decls.push_back({name, w, init});
+                continue;
+            }
+            if (cur().kind == Tok::KwAttribute) {
+                eat(Tok::KwAttribute, "'attribute'");
+                std::string name = eat(Tok::Ident, "attribute name").text;
+                eat(Tok::Colon, "':'");
+                int w = parseWidth();
+                eat(Tok::Eq, "'='");
+                uint64_t init = eat(Tok::Int, "default value").num;
+                prog.attrs.push_back({name, w, init & Reg::mask_for(w)});
                 continue;
             }
             if (cur().kind == Tok::KwPeople) {
@@ -697,6 +771,10 @@ struct Parser {
         st.kind = StmtKind::Op;
         st.verb = eat(Tok::Ident, "an operation").text;
         st.arg  = eat(Tok::Ident, "an argument").text;
+        if (cur().kind == Tok::Dot) {          // person.attribute
+            p++;
+            st.attr = eat(Tok::Ident, "an attribute name").text;
+        }
         if (cur().kind == Tok::Comma) {
             p++;
             st.shape = Shape::WithImm;
@@ -778,11 +856,12 @@ static bool resolveSet(const std::map<std::string, Binding>& defs,
 struct Expr {
     enum class K {
         Int, Reg, Toll, Before, Max, Add, Sub,
-        Cmp, Not, And, Or, Alive, All, Consistent
+        Cmp, Not, And, Or, Alive, Attr, Concept, All, Consistent
     };
     K k = K::Int;
     long long ival = 0;
-    std::string name;   // Reg / Before / Alive (person or bound name) / All (set)
+    std::string name;   // Reg / Before / Alive / Attr (person or bound name) / Concept (concept name) / All (set)
+    std::string attr2;  // Attr: the attribute;  Concept: the argument (person or bound name)
     std::string var;    // All: the name it binds
     std::string rel;    // Cmp
     std::vector<Expr> kids;
@@ -813,6 +892,8 @@ static std::string exprText(const Expr& e) {
         case Expr::K::And:        return exprText(e.kids[0]) + " and " + exprText(e.kids[1]);
         case Expr::K::Or:         return exprText(e.kids[0]) + " or " + exprText(e.kids[1]);
         case Expr::K::Alive:      return "alive(" + e.name + ")";
+        case Expr::K::Attr:       return e.name + "." + e.attr2;
+        case Expr::K::Concept:    return e.name + "(" + e.attr2 + ")";
         case Expr::K::All:        return "all " + e.var + " in " + e.name + ": " + exprText(e.kids[0]);
         case Expr::K::Consistent: return "consistent";
     }
@@ -837,12 +918,27 @@ struct PolicyInvariant {
     std::vector<std::string> reads;    // definitions its wording leans on (derived)
 };
 
+// A named, single-parameter predicate over the world (§8.2). The second layer
+// of the world model: raw attributes are the first layer, concepts are formulas
+// built over them. `dead(p) := ...`.
+struct PolicyConcept {
+    std::string name;
+    std::string param;
+    Expr body;
+};
+
 struct Genie {
     std::string counter = "wishes";
     uint64_t toll = 1;
+    std::vector<PolicyConcept> concepts;
     std::vector<PolicyRule> rules;
     std::vector<PolicyInvariant> invariants;
 };
+
+static const PolicyConcept* findConcept(const Genie& g, const std::string& n) {
+    for (const auto& c : g.concepts) if (c.name == n) return &c;
+    return nullptr;
+}
 
 // ---------------------------------------------------------------------------
 // Resolution.
@@ -936,7 +1032,8 @@ static bool resolvePlan(const Wish& w, const World& w0,
             }
             return false;
         }
-        if (shapeFor(OPS[op].operands) != st.shape) {
+        if (shapeFor(OPS[op].operands) != st.shape ||
+            wantsAttr(OPS[op].operands) != !st.attr.empty()) {
             if (reason) {
                 *reason = std::string("wrong operands for '") + OPS[op].keyword
                           + "' (line " + std::to_string(st.line) + ")";
@@ -954,7 +1051,7 @@ static bool resolvePlan(const Wish& w, const World& w0,
         }
 
         Resolved r;
-        r.line = st.line; r.src = si; r.op = op; r.arg = arg;
+        r.line = st.line; r.src = si; r.op = op; r.arg = arg; r.attr = st.attr;
         r.imm = st.imm; r.width = st.width;
         out.push_back(r);
     }
@@ -989,6 +1086,13 @@ static std::vector<std::string> setMembers(const EvalCtx& c, const std::string& 
     return out;
 }
 
+// A name in predicate position is either a quantifier/concept binding or a
+// literal person.
+static std::string resolvePerson(const EvalCtx& c, const std::string& name) {
+    auto it = c.binds.find(name);
+    return it == c.binds.end() ? name : it->second;
+}
+
 static Val evalExpr(const Expr& e, EvalCtx& c) {
     switch (e.k) {
         case Expr::K::Int:  return vInt(e.ival);
@@ -1019,11 +1123,20 @@ static Val evalExpr(const Expr& e, EvalCtx& c) {
         case Expr::K::Not: return vBool(!evalExpr(e.kids[0], c).b);
         case Expr::K::And: return vBool(evalExpr(e.kids[0], c).b && evalExpr(e.kids[1], c).b);
         case Expr::K::Or:  return vBool(evalExpr(e.kids[0], c).b || evalExpr(e.kids[1], c).b);
-        case Expr::K::Alive: {
-            auto bit = c.binds.find(e.name);
-            const std::string& who = bit == c.binds.end() ? e.name : bit->second;
-            auto it = c.w->alive.find(who);
-            return vBool(it != c.w->alive.end() && it->second);
+        case Expr::K::Alive:
+            return vBool(personAlive(*c.w, resolvePerson(c, e.name)));
+        case Expr::K::Attr:
+            return vInt((__int128)attrValue(*c.w, resolvePerson(c, e.name), e.attr2));
+        case Expr::K::Concept: {
+            const PolicyConcept* pc = findConcept(*c.g, e.name);
+            if (!pc) return vBool(false);
+            std::string who = resolvePerson(c, e.attr2);
+            std::string saved; bool had = c.binds.count(pc->param) > 0;
+            if (had) saved = c.binds[pc->param];
+            c.binds[pc->param] = who;
+            bool b = evalExpr(pc->body, c).b;
+            if (had) c.binds[pc->param] = saved; else c.binds.erase(pc->param);
+            return vBool(b);
         }
         case Expr::K::All: {
             for (const auto& m : setMembers(c, e.name)) {
@@ -1289,7 +1402,19 @@ struct PolicyParser {
             e.kids.push_back(parseExpr());
             return e;
         }
-        Expr e; e.k = Expr::K::Reg; e.name = name("a register or set name");
+        std::string id = name("a register, person, or concept");
+        if (cur().kind == Tok::Dot) {          // person.attribute
+            p++;
+            Expr e; e.k = Expr::K::Attr; e.name = id; e.attr2 = name("an attribute");
+            return e;
+        }
+        if (cur().kind == Tok::LParen) {       // concept application: dead(p)
+            p++;
+            Expr e; e.k = Expr::K::Concept; e.name = id; e.attr2 = name("an argument");
+            eat(Tok::RParen, "')'");
+            return e;
+        }
+        Expr e; e.k = Expr::K::Reg; e.name = id;
         return e;
     }
 
@@ -1310,6 +1435,19 @@ struct PolicyParser {
         while (cur().kind != Tok::End) {
             if (word("counter")) { p++; g.counter = name("a register name"); continue; }
             if (word("toll"))    { p++; g.toll = eat(Tok::Int, "an integer").num; continue; }
+
+            if (word("concept")) {
+                p++;
+                PolicyConcept pc;
+                pc.name = name("a concept name");
+                eat(Tok::LParen, "'('");
+                pc.param = name("the parameter name");
+                eat(Tok::RParen, "')'");
+                eat(Tok::ColonEq, "':='");
+                pc.body = parseExpr();
+                g.concepts.push_back(std::move(pc));
+                continue;
+            }
 
             if (word("rule")) {
                 p++;
@@ -1499,9 +1637,14 @@ Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log
             }
             continue;
         }
-        if (OPS[r.op].operands == OperandKind::Person) {
-            if (!world.alive.count(r.arg)) {
+        OperandKind ok = OPS[r.op].operands;
+        if (ok == OperandKind::Person || ok == OperandKind::AttrImm) {
+            if (!isPerson(world, r.arg)) {
                 o.error = "no such person '" + r.arg + "'";
+                return o;
+            }
+            if (ok == OperandKind::AttrImm && !attrSchema(world, r.attr)) {
+                o.error = "no such attribute '" + r.attr + "'";
                 return o;
             }
         } else if (!world.regs.count(r.arg)) {
@@ -1602,6 +1745,14 @@ std::vector<Stmt> buildAlphabet(const World& w, const Genie& g, const HuntConfig
             } else if (OPS[i].operands == OperandKind::RegWidth) {
                 s.shape = Shape::WithWidth; s.arg = g.counter;
                 for (int bw : cfg.widths) { s.width = bw; a.push_back(s); }
+            } else if (OPS[i].operands == OperandKind::AttrImm) {
+                s.shape = Shape::WithImm;
+                for (const auto& p : w.people)
+                    for (const auto& at : w.attrs) {
+                        s.arg = p; s.attr = at.name;
+                        for (uint64_t k = 0; k <= cfg.max_imm; k++) { s.imm = k; a.push_back(s); }
+                    }
+                s.attr.clear();
             } else {
                 s.shape = Shape::Bare;
                 for (const auto& p : w.people) { s.arg = p; a.push_back(s); }
@@ -2005,7 +2156,10 @@ int main(int argc, char** argv) {
         world.regs[d.name] = r;
     }
     world.people = prog.people;
-    for (const auto& p : prog.people) world.alive[p] = true;
+    world.attrs = prog.attrs;
+    for (const auto& p : prog.people) {
+        for (const auto& a : prog.attrs) world.attr[p][a.name] = a.deflt;
+    }
     {   // `everyone` starts out meaning what you would expect. It is a
         // definition, though, and definitions are rebindable.
         Binding b; b.kind = Binding::Kind::Set; b.members = prog.people;
@@ -2025,7 +2179,7 @@ int main(int argc, char** argv) {
         std::string bad;
         std::function<void(const Fml&)> check = [&](const Fml& f) {
             if (f.k == Fml::K::Granted && f.name != "self" && !names.count(f.name)) bad = f.name;
-            if (f.k == Fml::K::Alive && !world.alive.count(f.name)) bad = f.name;
+            if (f.k == Fml::K::Alive && !isPerson(world, f.name)) bad = f.name;
             for (const auto& k : f.kids) check(k);
         };
         for (const auto& w : prog.wishes)

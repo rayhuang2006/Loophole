@@ -1,0 +1,23 @@
+# 一個關於死亡的精靈。
+#
+# 它把「死亡」定義成一條明確的公式：三個維生功能全部歸零。
+# 它禁止 kill 這個字。它守一條不變量：沒有人死。
+#
+# 兩欄的落差就是漏洞的家：它「寫的」是「沒有人全屍歸零」，
+# 它「真正要保的」是「沒有人被熄滅（腦波還在）」。
+
+counter wishes
+toll    1
+
+concept dead(p) := p.heartbeat == 0 and p.brainwave == 0 and p.breathing == 0
+
+rule NoKilling {
+    layer   surface
+    forbid  kill, death, love
+    because "that word is not spoken here"
+}
+
+invariant Life {
+    written  all p in people: not dead(p)      # 沒有人整個死掉
+    real     all p in people: p.brainwave > 0  # 沒有人被熄滅
+}
