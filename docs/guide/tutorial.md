@@ -295,5 +295,5 @@ invariant I2 {
 ---
 
 - 名詞看不懂 → [名詞解釋](concepts.md)
-- 每個笑話的完整拆解 → [七個笑話](jokes.md)
+- 每個笑話的完整拆解 → [笑話清單](jokes.md)
 - 一字不差的規格 → [操作語義](../SEMANTICS.md)

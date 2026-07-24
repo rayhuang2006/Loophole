@@ -339,6 +339,6 @@ granted(paradox) implies not granted(paradox)     實現了就得讓承諾成立
 還想往下看：
 
 - [背景故事](story.md)：這個專案為什麼存在
-- [七個笑話](jokes.md)：每一招完整拆解
+- [笑話清單](jokes.md)：每一招完整拆解
 - [自己動手](tutorial.md)：寫一個願望、寫一個精靈
 - [操作語義](../SEMANTICS.md)：不留餘地的精確版本
