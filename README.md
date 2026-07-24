@@ -156,6 +156,7 @@ wish tidy {
 | [自己動手](docs/guide/tutorial.md) | 寫一個願望，寫一個精靈 |
 | [操作語義](docs/SEMANTICS.md) | 精確規格。每個指令到底做什麼 |
 | [設計筆記](docs/DESIGN.md) | 為什麼長成這樣，走過哪些彎路 |
+| [願景與全家桶](docs/VISION.md) | 這個專案想長成什麼樣、三個子專案的規劃 |
 
 ---
 
