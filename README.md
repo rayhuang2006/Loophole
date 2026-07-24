@@ -14,32 +14,40 @@
 於是他許第二個願望——把格子換成 64 位元。這完全合規，他要的是容量不是願望。
 然後同一招再來一次。
 
-`wishc` 把這件事變成真的。你寫一個願望，它證明你**完全遵守了規則**，
-然後算給精靈看它的規則剛剛被你合法地拆穿。
-
-願望不是嘴砲。「這樣就繞過了吧？」——真的嗎？寫成 `.wish`，編譯通過才算數。
+`wishc` 把這個笑話變成一個可以編譯的東西。上面那三個願望不是比喻，是一個檔案：
 
 ```wish
-wish humble {
-    sub wishes, 3            # 我要「還給你」三個願望。多麼慷慨。
-}
+wish experiment      { sub   wishes, 3          }
+wish bigger_shelf    { widen wishes -> uint<64> }
+wish experiment_again{ sub   wishes, 2          }
 ```
 
 ```
-$ ./wishc examples/01_humble.wish
+$ ./wishc examples/07_the_original.wish
 
-wish humble {
+wish experiment {
     toll:  wishes 3 -> 2
     sub    wishes, 3   (2 - 3 on uint<2> = 3)
     STATUS:  LEGAL
-    I1  wishes <= 3                   ->  holds      (wishes = 3, needs <= 3)
-    I2  no net gain                   ->  VIOLATED   (wishes = 3, needs <= 2)
-    >> EXPLOIT: legal wish, breached I2. 合規，且拆穿。
+    I2  no net gain  ->  VIOLATED   (wishes = 3, needs <= 2)
+}
+
+wish bigger_shelf {
+    widen  wishes -> uint<64>   (value preserved: 2)
+    I1  wishes <= 3  ->  holds          ← 這一步什麼規矩都沒破
+}
+
+wish experiment_again {
+    sub    wishes, 2   (1 - 2 on uint<64> = 18446744073709551615)
+    I1  wishes <= 3  ->  VIOLATED
 }
 ```
 
-精靈唯一的實質規矩是「不准許願要更多願望」，而你從頭到尾只做了減法。
-你付了一個、還了三個，結果更有錢。無號整數的減法，只是加法換了張臉。
+中間那個願望值得多看兩秒：**它什麼都沒偷，它只是把鎖拆了。**
+精靈那句「不超過三個」本來是兩位元的寬度免費送的——反正裝不下 4。
+換成 64 位元之後保證就沒了，而精靈從來沒寫過真正的檢查。
+
+願望不是嘴砲。「這樣就繞過了吧？」——真的嗎？寫成 `.wish`，編譯通過才算數。
 
 ---
 
@@ -64,7 +72,7 @@ make run                          # 跑過全部八個例子
 | `04_nobody.wish` | 沒辦法讓死人復活，那就重新定義「所有人」 |
 | `05_liar.wish` | 「我保證這個願望永遠不會被實現。」 |
 | `06_next_one.wish` | 不用談自己，一樣能把精靈逼進矛盾 |
-| `07_the_original.wish` | 上面那個笑話，三個願望一字不差 |
+| `07_the_original.wish` | 上面那個，原版笑話三個願望一字不差 |
 
 每一招的完整拆解在 [笑話清單](docs/guide/jokes.md)。
 
