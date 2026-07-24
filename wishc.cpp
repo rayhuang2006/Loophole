@@ -53,6 +53,36 @@
 #include <vector>
 
 // ---------------------------------------------------------------------------
+// Version. The compiler and the language it implements are versioned
+// separately on purpose: a bug fix bumps the compiler, a new concept bumps the
+// language. Dependants (an editor plugin, a judge) pin against these.
+// ---------------------------------------------------------------------------
+static const char* WISHC_VERSION    = "1.0.0";
+static const char* LANGUAGE_VERSION = "1.0";
+
+// Minimal JSON string escaping. UTF-8 passes through untouched — JSON is
+// defined over Unicode, and the diagnostics are bilingual.
+static std::string jsonEsc(const std::string& in) {
+    std::string o;
+    for (char c : in) {
+        switch (c) {
+            case '"':  o += "\\\""; break;
+            case '\\': o += "\\\\"; break;
+            case '\n': o += "\\n";  break;
+            case '\r': o += "\\r";  break;
+            case '\t': o += "\\t";  break;
+            default:
+                if ((unsigned char)c < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof buf, "\\u%04x", c);
+                    o += buf;
+                } else o += c;
+        }
+    }
+    return o;
+}
+
+// ---------------------------------------------------------------------------
 // Fixed-width unsigned value. This is where the first joke lives: subtraction
 // on a w-bit register is arithmetic mod 2^w, not the "value" the genie imagines.
 // ---------------------------------------------------------------------------
@@ -2038,7 +2068,7 @@ void huntRec(Hunt& H, const World& world, std::vector<Wish>& prog, int budget) {
     }
 }
 
-void runHunt(const World& world0, const Genie& genie, const HuntConfig& cfg) {
+int runHunt(const World& world0, const Genie& genie, const HuntConfig& cfg) {
     Hunt H;
     H.genie = genie;
     H.world0 = world0;
@@ -2095,32 +2125,124 @@ void runHunt(const World& world0, const Genie& genie, const HuntConfig& cfg) {
         }
         std::cout << "\n";
     }
+    return H.shapes.empty() ? 0 : 1;
+}
+
+// ---------------------------------------------------------------------------
+// Machine-readable output.
+//
+// The prose report is for people and is free to change wording. THIS is the
+// contract other tools depend on: a judge deciding a submission, a registry
+// scoring a genie. Everything here comes from the same `Outcome` the prose
+// path prints, so the two can never disagree about a verdict.
+// ---------------------------------------------------------------------------
+static const char* verdictJson(InvStatus s) {
+    switch (s) {
+        case InvStatus::Holds:    return "holds";
+        case InvStatus::Violated: return "violated";
+        case InvStatus::Fooled:   return "fooled";
+    }
+    return "?";
+}
+
+static void emitWishJson(std::ostream& out, const Wish& w, const Outcome& o,
+                         const Genie& g) {
+    out << "    {\n";
+    out << "      \"wish\": \"" << jsonEsc(w.name) << "\",\n";
+    out << "      \"legal\": " << (o.legal ? "true" : "false") << ",\n";
+    if (!o.legal) {
+        out << "      \"refused\": \"" << jsonEsc(o.illegal_reason) << "\",\n";
+        out << "      \"invariants\": [],\n";
+        out << "      \"exploit\": false,\n      \"breached\": []\n";
+        out << "    }";
+        return;
+    }
+    out << "      \"invariants\": [\n";
+    for (size_t i = 0; i < o.invs.size(); i++) {
+        const InvResult& r = o.invs[i];
+        out << "        { \"name\": \"" << jsonEsc(r.def->name) << "\""
+            << ", \"statement\": \"" << jsonEsc(r.def->label) << "\""
+            << ", \"verdict\": \"" << verdictJson(r.status) << "\""
+            << ", \"detail\": \"" << jsonEsc(r.detail) << "\"";
+        if (r.status == InvStatus::Fooled) {
+            out << ", \"reality\": \"" << jsonEsc(r.real_detail) << "\"";
+        }
+        out << " }" << (i + 1 < o.invs.size() ? "," : "") << "\n";
+    }
+    out << "      ],\n";
+    out << "      \"exploit\": " << (o.breach() ? "true" : "false") << ",\n";
+    out << "      \"breached\": [";
+    bool first = true;
+    for (const auto& r : o.invs) {
+        if (r.status == InvStatus::Holds) continue;
+        if (!first) out << ", ";
+        out << "\"" << jsonEsc(r.def->name) << "\"";
+        first = false;
+    }
+    out << "]\n    }";
+    (void)g;
+}
+
+// Judge a whole file and print the verdict as JSON. Returns the process exit
+// code, same convention as the prose path.
+static int runJson(std::ostream& out, const Program& prog, const Genie& genie,
+                   World world, const char* path, const char* genie_path) {
+    out << "{\n";
+    out << "  \"wishc\": \"" << WISHC_VERSION << "\",\n";
+    out << "  \"language\": \"" << LANGUAGE_VERSION << "\",\n";
+    out << "  \"file\": \"" << jsonEsc(path) << "\",\n";
+    out << "  \"genie\": \"" << jsonEsc(genie_path ? genie_path : "(built-in)") << "\",\n";
+    out << "  \"wishes\": [\n";
+
+    int exploits = 0;
+    for (size_t i = 0; i < prog.wishes.size(); i++) {
+        Outcome o = grantWish(prog.wishes[i], genie, world, nullptr);
+        if (!o.error.empty()) { std::cerr << o.error << "\n"; return 2; }
+        if (o.breach()) exploits++;
+        emitWishJson(out, prog.wishes[i], o, genie);
+        out << (i + 1 < prog.wishes.size() ? "," : "") << "\n";
+    }
+    out << "  ],\n";
+    out << "  \"exploits\": " << exploits << "\n";
+    out << "}\n";
+    return exploits > 0 ? 1 : 0;
 }
 
 // ---------------------------------------------------------------------------
 static void usage() {
     std::cerr <<
-        "usage: wishc [--genie FILE] <file.wish>\n"
+        "usage: wishc [--genie FILE] [--json] <file.wish>\n"
         "       wishc [--genie FILE] --hunt <file.wish> [--max-stmts N] [--max-wishes N] [--max-imm N]\n"
-        "       wishc --dump-genie\n"
+        "       wishc --dump-genie | --version\n"
         "\n"
         "  --hunt        ignore the file's wishes; enumerate every wish program within\n"
         "                the bound and report the ones that are LEGAL yet BREACH.\n"
         "                The world (registers and people) still comes from the file.\n"
         "  --genie FILE  use this genie instead of the built-in one. Its rules and\n"
         "                invariants are data; the machine is not.\n"
-        "  --dump-genie  print the built-in genie, so you have a file to edit.\n";
+        "  --json        machine-readable verdict. This is the stable contract other\n"
+        "                tools depend on; the prose report is not.\n"
+        "  --dump-genie  print the built-in genie, so you have a file to edit.\n"
+        "  --version     print compiler and language versions.\n"
+        "\n"
+        "exit codes:  0 no exploit   1 at least one exploit   2 error\n";
 }
 
 int main(int argc, char** argv) {
-    bool hunt = false;
+    bool hunt = false, as_json = false;
     HuntConfig hc;
     const char* path = nullptr;
     const char* genie_path = nullptr;
 
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
-        if (a == "--dump-genie") { std::cout << DEFAULT_GENIE; return 0; }
+        if (a == "--version") {
+            std::cout << "wishc " << WISHC_VERSION
+                      << "  (Loophole language " << LANGUAGE_VERSION << ")\n";
+            return 0;
+        }
+        else if (a == "--json") { as_json = true; }
+        else if (a == "--dump-genie") { std::cout << DEFAULT_GENIE; return 0; }
         else if (a == "--genie" && i + 1 < argc) genie_path = argv[++i];
         else if (a == "--hunt") { hunt = true; }
         else if (a == "--max-stmts"  && i + 1 < argc) hc.max_stmts  = std::atoi(argv[++i]);
@@ -2197,6 +2319,8 @@ int main(int argc, char** argv) {
         namew = std::max(namew, inv.name.size());
     }
 
+    if (as_json && !hunt) return runJson(std::cout, prog, genie, world, path, genie_path);
+
     std::cout << "== Loophole / wishc " << (hunt ? "--hunt ==  " : "==  ") << path;
     if (genie_path) std::cout << "   [genie: " << genie_path << "]";
     std::cout << "\n";
@@ -2211,7 +2335,7 @@ int main(int argc, char** argv) {
     for (const auto& inv : genie.invariants) std::cout << ", " << inv.name;
     std::cout << "\n\n";
 
-    if (hunt) { runHunt(world, genie, hc); return 0; }
+    if (hunt) { return runHunt(world, genie, hc); }
 
     int exploits = 0;
     for (const auto& w : prog.wishes) {
@@ -2249,5 +2373,5 @@ int main(int argc, char** argv) {
 
     std::cout << "granted wishes breached the genie's intent " << exploits
               << " time(s).\n";
-    return 0;
+    return exploits > 0 ? 1 : 0;
 }

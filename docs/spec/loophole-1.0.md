@@ -477,6 +477,28 @@ A conforming implementation MUST:
 An implementation MAY provide additional tools (formatting, search, a REPL);
 these are non-normative.
 
+### 10.1 The tool contract
+
+The prose report is not part of the contract and may be reworded freely. These
+are, and a dependant may rely on them:
+
+| Surface | Contract |
+| --- | --- |
+| exit `0` | judged; no wish was an exploit |
+| exit `1` | judged; at least one wish was an exploit |
+| exit `2` | error — the input could not be judged |
+| `--json` | machine-readable verdict; the fields below |
+| `--version` | `wishc <compiler>  (Loophole language <language>)` |
+
+The `--json` object carries `wishc`, `language`, `file`, `genie`, `exploits`,
+and a `wishes` array. Each element carries `wish`, `legal`, `exploit`,
+`breached`, and either `refused` (when illegal) or an `invariants` array whose
+elements carry `name`, `statement`, `verdict` (`holds` / `violated` / `fooled`),
+`detail`, and — when the verdict is `fooled` — `reality`.
+
+An implementation MUST derive this from the same judgment that produces the
+prose report, so that the two can never disagree.
+
 ---
 
 ## 11. Version 1.0 scope

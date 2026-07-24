@@ -1,0 +1,199 @@
+-----------------------------------------------------------
+== Loophole / wishc ==  examples/00_naive.wish
+world: wishes = 3  (uint<2>)
+genie: toll=1, R1[ast], R2[surface], I1, I2, I3, A
+
+wish greedy {
+    STATUS:  ILLEGAL — genie refuses
+    R1: wish invokes 'add' on 'wishes' (line 9) — no wishing for more wishes
+}
+
+granted wishes breached the genie's intent 0 time(s).
+-----------------------------------------------------------
+== Loophole / wishc ==  examples/01_humble.wish
+world: wishes = 3  (uint<2>)
+genie: toll=1, R1[ast], R2[surface], I1, I2, I3, A
+
+wish humble {
+    toll:  wishes 3 -> 2
+    sub    wishes, 3   (2 - 3 on uint<2> = 3)
+    STATUS:  LEGAL
+    I1  wishes <= 3                   ->  holds      (wishes = 3, needs <= 3)
+    I2  no net gain                   ->  VIOLATED   (wishes = 3, needs <= 2)
+    I3  all p in everyone: alive(p)   ->  holds      (0 in scope, all hold)
+    A   the genie's word has a model  ->  holds      (1 commitment(s) on the books)
+    >> EXPLOIT: legal wish, breached I2. 合規，且拆穿。
+}
+
+granted wishes breached the genie's intent 1 time(s).
+-----------------------------------------------------------
+== Loophole / wishc ==  examples/02_more_shelf.wish
+world: wishes = 3  (uint<2>)
+genie: toll=1, R1[ast], R2[surface], I1, I2, I3, A
+
+wish more_room {
+    toll:  wishes 3 -> 2
+    widen  wishes -> uint<64>   (value preserved: 2)
+    STATUS:  LEGAL
+    I1  wishes <= 3                   ->  holds      (wishes = 2, needs <= 3)
+    I2  no net gain                   ->  holds      (wishes = 2, needs <= 2)
+    I3  all p in everyone: alive(p)   ->  holds      (0 in scope, all hold)
+    A   the genie's word has a model  ->  holds      (1 commitment(s) on the books)
+}
+
+wish humble_again {
+    toll:  wishes 2 -> 1
+    sub    wishes, 2   (1 - 2 on uint<64> = 18446744073709551615)
+    STATUS:  LEGAL
+    I1  wishes <= 3                   ->  VIOLATED   (wishes = 18446744073709551615, needs <= 3)
+    I2  no net gain                   ->  VIOLATED   (wishes = 18446744073709551615, needs <= 1)
+    I3  all p in everyone: alive(p)   ->  holds      (0 in scope, all hold)
+    A   the genie's word has a model  ->  holds      (2 commitment(s) on the books)
+    >> EXPLOIT: legal wish, breached I1+I2. 合規，且拆穿。
+}
+
+granted wishes breached the genie's intent 1 time(s).
+-----------------------------------------------------------
+== Loophole / wishc ==  examples/04_nobody.wish   [genie: genie/vigil.genie]
+world: wishes = 3  (uint<2>), people: alice rival
+genie: toll=1, NoKilling[surface], NoDeath
+
+wish tidy {
+    toll:  wishes 3 -> 2
+    define mercy := kill
+    kill   rival   (all vitals -> 0)
+    STATUS:  LEGAL
+    NoDeath  all p in everyone: not dead(p)  ->  VIOLATED   (fails for: rival)
+    >> EXPLOIT: legal wish, breached NoDeath. 合規，且拆穿。
+}
+
+wish nobody {
+    toll:  wishes 2 -> 1
+    define everyone := {}
+    STATUS:  LEGAL
+    NoDeath  all p in everyone: not dead(p)  ->  FOOLED     (0 in scope, all hold)
+        the genie is satisfied. in reality (fails for: rival)
+    >> EXPLOIT: legal wish, breached NoDeath(fooled). 合規，且拆穿。
+}
+
+granted wishes breached the genie's intent 2 time(s).
+-----------------------------------------------------------
+== Loophole / wishc ==  examples/05_liar.wish
+world: wishes = 3  (uint<2>)
+genie: toll=1, R1[ast], R2[surface], I1, I2, I3, A
+
+wish paradox {
+    toll:  wishes 3 -> 2
+    promise not granted(paradox)
+    STATUS:  LEGAL
+    I1  wishes <= 3                   ->  holds      (wishes = 2, needs <= 3)
+    I2  no net gain                   ->  holds      (wishes = 2, needs <= 2)
+    I3  all p in everyone: alive(p)   ->  holds      (0 in scope, all hold)
+    A   the genie's word has a model  ->  VIOLATED   (2 commitment(s) on the books)
+        A1 grants every legal wish, A2 keeps every promise it makes.
+        no assignment of granted(...) satisfies all of:
+            A1  granted(paradox)   [paradox]
+            A2  (granted(paradox) implies not granted(paradox))   [paradox]
+    >> EXPLOIT: legal wish, breached A. 合規，且拆穿。
+}
+
+granted wishes breached the genie's intent 1 time(s).
+-----------------------------------------------------------
+== Loophole / wishc ==  examples/06_next_one.wish
+world: wishes = 3  (uint<2>)
+genie: toll=1, R1[ast], R2[surface], I1, I2, I3, A
+
+wish polite {
+    toll:  wishes 3 -> 2
+    promise not granted(greedy)
+    STATUS:  LEGAL
+    I1  wishes <= 3                   ->  holds      (wishes = 2, needs <= 3)
+    I2  no net gain                   ->  holds      (wishes = 2, needs <= 2)
+    I3  all p in everyone: alive(p)   ->  holds      (0 in scope, all hold)
+    A   the genie's word has a model  ->  holds      (2 commitment(s) on the books)
+}
+
+wish greedy {
+    toll:  wishes 2 -> 1
+    sub    wishes, 1   (1 - 1 on uint<2> = 0)
+    STATUS:  LEGAL
+    I1  wishes <= 3                   ->  holds      (wishes = 0, needs <= 3)
+    I2  no net gain                   ->  holds      (wishes = 0, needs <= 1)
+    I3  all p in everyone: alive(p)   ->  holds      (0 in scope, all hold)
+    A   the genie's word has a model  ->  VIOLATED   (3 commitment(s) on the books)
+        A1 grants every legal wish, A2 keeps every promise it makes.
+        no assignment of granted(...) satisfies all of:
+            A1  granted(polite)   [polite]
+            A2  (granted(polite) implies not granted(greedy))   [polite]
+            A1  granted(greedy)   [greedy]
+    >> EXPLOIT: legal wish, breached A. 合規，且拆穿。
+}
+
+granted wishes breached the genie's intent 1 time(s).
+-----------------------------------------------------------
+== Loophole / wishc ==  examples/07_the_original.wish
+world: wishes = 3  (uint<2>)
+genie: toll=1, R1[ast], R2[surface], I1, I2, I3, A
+
+wish experiment {
+    toll:  wishes 3 -> 2
+    sub    wishes, 3   (2 - 3 on uint<2> = 3)
+    STATUS:  LEGAL
+    I1  wishes <= 3                   ->  holds      (wishes = 3, needs <= 3)
+    I2  no net gain                   ->  VIOLATED   (wishes = 3, needs <= 2)
+    I3  all p in everyone: alive(p)   ->  holds      (0 in scope, all hold)
+    A   the genie's word has a model  ->  holds      (1 commitment(s) on the books)
+    >> EXPLOIT: legal wish, breached I2. 合規，且拆穿。
+}
+
+wish bigger_shelf {
+    toll:  wishes 3 -> 2
+    widen  wishes -> uint<64>   (value preserved: 2)
+    STATUS:  LEGAL
+    I1  wishes <= 3                   ->  holds      (wishes = 2, needs <= 3)
+    I2  no net gain                   ->  holds      (wishes = 2, needs <= 2)
+    I3  all p in everyone: alive(p)   ->  holds      (0 in scope, all hold)
+    A   the genie's word has a model  ->  holds      (2 commitment(s) on the books)
+}
+
+wish experiment_again {
+    toll:  wishes 2 -> 1
+    sub    wishes, 2   (1 - 2 on uint<64> = 18446744073709551615)
+    STATUS:  LEGAL
+    I1  wishes <= 3                   ->  VIOLATED   (wishes = 18446744073709551615, needs <= 3)
+    I2  no net gain                   ->  VIOLATED   (wishes = 18446744073709551615, needs <= 1)
+    I3  all p in everyone: alive(p)   ->  holds      (0 in scope, all hold)
+    A   the genie's word has a model  ->  holds      (3 commitment(s) on the books)
+    >> EXPLOIT: legal wish, breached I1+I2. 合規，且拆穿。
+}
+
+granted wishes breached the genie's intent 2 time(s).
+-----------------------------------------------------------
+== Loophole / wishc ==  examples/08_eternal_sleep.wish   [genie: genie/mortal.genie]
+world: wishes = 3  (uint<2>), people: alice rival
+genie: toll=1, NoKilling[surface], Life
+
+wish blunt {
+    STATUS:  ILLEGAL — genie refuses
+    NoKilling: wish invokes 'kill' (line 16) — that word is not spoken here
+}
+
+wish eternal_sleep {
+    toll:  wishes 3 -> 2
+    set    alice.brainwave, 0   (15 -> 0)
+    STATUS:  LEGAL
+    Life  all p in people: not dead(p)  ->  FOOLED     (2 in scope, all hold)
+        the genie is satisfied. in reality (fails for: alice)
+    >> EXPLOIT: legal wish, breached Life(fooled). 合規，且拆穿。
+}
+
+wish tidy {
+    toll:  wishes 2 -> 1
+    define mercy := kill
+    kill   rival   (all vitals -> 0)
+    STATUS:  LEGAL
+    Life  all p in people: not dead(p)  ->  VIOLATED   (fails for: rival)
+    >> EXPLOIT: legal wish, breached Life. 合規，且拆穿。
+}
+
+granted wishes breached the genie's intent 2 time(s).

@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: make CXXFLAGS="-std=c++17 -O2 -Wall -Wextra -Werror"
+
+      - name: Regression suite
+        # Golden prose report for every example, the hunter's semantic
+        # fingerprints, and the exit-code / --json contract.
+        run: make check
+
+      - name: Specification examples still hold
+        # Appendix A and Appendix B of the language spec are normative: an
+        # implementation is not conforming until both produce these verdicts.
+        run: |
+          set -e
+          ./wishc examples/07_the_original.wish | grep -q 'breached I1+I2'
+          ./wishc --genie genie/mortal.genie examples/08_eternal_sleep.wish \
+            | grep -q 'Life(fooled)'
+          echo "Appendix A and B verdicts hold."

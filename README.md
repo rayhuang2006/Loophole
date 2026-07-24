@@ -1,5 +1,7 @@
 # Loophole
 
+[![CI](https://github.com/rayhuang2006/Loophole/actions/workflows/ci.yml/badge.svg)](https://github.com/rayhuang2006/Loophole/actions/workflows/ci.yml)
+
 > A compiler that proves your genie exploit is *technically* legal.
 
 有個工程師笑話是這樣的。精靈的戒律是不能殺人、不能讓人相愛、不能許願要更多願望。
@@ -59,6 +61,7 @@ wish experiment_again {
 make
 ./wishc examples/01_humble.wish
 make run                          # 跑過全部例子（自動帶對的精靈）
+make check                        # 回歸測試（CI 跑的就是這個）
 ```
 
 一個比一個歪：
@@ -149,6 +152,44 @@ wish tidy {
 
 ---
 
+## 給工具用的介面
+
+散文報告是給人看的，措辭會變。**要拿 `wishc` 當依賴的話，用這兩個**——
+它們是穩定的契約：
+
+```bash
+./wishc --json examples/01_humble.wish     # 機器可讀的判決
+./wishc --version                          # wishc 1.0.0  (Loophole language 1.0)
+```
+
+```json
+{
+  "wishc": "1.0.0", "language": "1.0",
+  "wishes": [
+    { "wish": "humble", "legal": true,
+      "invariants": [ { "name": "I2", "verdict": "violated", "detail": "(wishes = 3, needs <= 2)" } ],
+      "exploit": true, "breached": ["I2"] }
+  ],
+  "exploits": 1
+}
+```
+
+離開碼也有意義，腳本可以直接用：
+
+| 碼 | 意思 |
+| --- | --- |
+| `0` | 跑完了，沒有 exploit |
+| `1` | 跑完了，至少一個 exploit |
+| `2` | 錯誤（檔案、語法、執行期） |
+
+所以「這個精靈守得住嗎」可以直接寫成一行：
+
+```bash
+./wishc --genie mine.genie --hunt w.wish && echo "滴水不漏"
+```
+
+---
+
 ## 文件
 
 剛接觸的話，從第一份開始讀就好：
@@ -173,7 +214,8 @@ wish tidy {
 - **Phase 3** 自我指涉：承諾、精靈的元公理、命題邏輯引擎。**done**
 - **Phase 4** 精靈變成可載入的資料檔。**done**
 - **v1.0** 兩層世界模型：人的屬性 + 精靈用 `concept` 定義的死亡。**done**（規格見 [語言規格 1.0](docs/spec/loophole-1.0.md)）
-- **接下來** 讓別人提交願望和精靈、CI 驗證、瀏覽器 playground。
+- **v1.0.0 發布** LICENSE、版本號、機器可讀輸出、離開碼契約、CI。**done**
+- **接下來** 瀏覽器 playground、解題站、VSCode 語法高亮。
 
 現在的語言認得 `register` / `attribute` / `people` / `wish` / `define` / `promise`，
 六個操作 `sub` / `add` / `widen` / `set` / `kill` / `revive`，
