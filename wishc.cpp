@@ -393,6 +393,12 @@ struct Resolved {
     bool is_define = false;
     bool is_promise = false;
     int line = 1;
+    // Which statement of the wish body this came from. Resolution happens to be
+    // one-to-one today, and `expandProgram` used to just assume that by
+    // indexing both with the same counter. Carrying the index means the day
+    // somebody makes one statement resolve into two, expansion stays correct
+    // instead of silently pairing up the wrong lines.
+    size_t src = 0;
 
     Fml fml;                     // is_promise, with `self` already resolved
 
@@ -765,9 +771,10 @@ static bool resolvePlan(const Wish& w, const World& w0,
     std::map<std::string, Binding> defs = w0.defs;
     out.clear();
 
-    for (const auto& st : w.body) {
+    for (size_t si = 0; si < w.body.size(); si++) {
+        const Stmt& st = w.body[si];
         if (st.kind == StmtKind::Promise) {
-            Resolved r; r.is_promise = true; r.line = st.line;
+            Resolved r; r.is_promise = true; r.line = st.line; r.src = si;
             r.fml = st.fml;
             resolveSelf(r.fml, w.name);
             out.push_back(std::move(r));
@@ -792,7 +799,7 @@ static bool resolvePlan(const Wish& w, const World& w0,
                 }
                 return false;
             }
-            Resolved r; r.is_define = true; r.line = st.line;
+            Resolved r; r.is_define = true; r.line = st.line; r.src = si;
             r.defname = st.defname; r.binding = b;
             out.push_back(r);
             continue;
@@ -832,7 +839,7 @@ static bool resolvePlan(const Wish& w, const World& w0,
         }
 
         Resolved r;
-        r.line = st.line; r.op = op; r.arg = arg;
+        r.line = st.line; r.src = si; r.op = op; r.arg = arg;
         r.imm = st.imm; r.width = st.width;
         out.push_back(r);
     }
@@ -1327,10 +1334,10 @@ static bool expandProgram(const std::vector<Wish>& prog, const World& w0,
         for (size_t i = 0; i < plan.size(); i++) {
             const Resolved& r = plan[i];
             if (r.is_define) {
-                if (isInvariantRead(r.defname)) e.body.push_back(wish.body[i]);
+                if (isInvariantRead(r.defname)) e.body.push_back(wish.body[r.src]);
                 continue;
             }
-            Stmt s = wish.body[i];
+            Stmt s = wish.body[r.src];
             s.verb = OPS[r.op].keyword;
             s.arg  = r.arg;
             e.body.push_back(s);
