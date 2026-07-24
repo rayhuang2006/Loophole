@@ -1741,6 +1741,7 @@ struct Shaped {
     std::vector<Wish> prog;      // the minimal witness
     Outcome last;
     std::string broke;           // which single promise this witness breaks
+    std::string key;             // the signature; also the final sort tiebreak
     int stmts = 0;
     long long count = 0;
 };
@@ -2010,7 +2011,7 @@ void recordOne(Hunt& H, const std::vector<Wish>& progIn, const Outcome& lastIn,
     auto it = H.shapes.find(key);
     if (it == H.shapes.end()) {
         Shaped sh;
-        sh.prog = prog; sh.last = last; sh.broke = broke;
+        sh.prog = prog; sh.last = last; sh.broke = broke; sh.key = key;
         sh.stmts = stmts; sh.count = 1;
         H.shapes.emplace(key, std::move(sh));
         return;
@@ -2096,9 +2097,15 @@ int runHunt(const World& world0, const Genie& genie, const HuntConfig& cfg) {
 
     std::vector<const Shaped*> order;
     for (const auto& kv : H.shapes) order.push_back(&kv.second);
+    // A STRICT TOTAL order. Size first, then the signature — the last term is
+    // not decoration: std::sort is not stable, so without a tiebreak two shapes
+    // of equal size could come out in either order, and two standard libraries
+    // would print different reports. §9.3 of the spec requires implementations
+    // to agree verbatim, so the ordering has to be fully determined here.
     std::sort(order.begin(), order.end(), [](const Shaped* a, const Shaped* b) {
-        if (a->stmts != b->stmts) return a->stmts < b->stmts;
-        return a->prog.size() < b->prog.size();
+        if (a->stmts != b->stmts)           return a->stmts < b->stmts;
+        if (a->prog.size() != b->prog.size()) return a->prog.size() < b->prog.size();
+        return a->key < b->key;
     });
 
     int n = 0;
