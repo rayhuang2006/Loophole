@@ -1870,6 +1870,10 @@ static bool expandProgram(const std::vector<Wish>& prog, const World& w0,
         Wish e; e.name = wish.name;
         for (size_t i = 0; i < plan.size(); i++) {
             const Resolved& r = plan[i];
+            // A promise has no verb to canonicalise — it carries a formula, not
+            // an operation — so it passes through untouched. Without this it
+            // falls into the branch below and indexes OPS with op == -1.
+            if (r.is_promise) { e.body.push_back(wish.body[r.src]); continue; }
             if (r.is_define) {
                 if (isInvariantRead(g, r.defname)) e.body.push_back(wish.body[r.src]);
                 continue;

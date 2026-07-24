@@ -39,3 +39,31 @@ jobs:
           ./wishc --genie genie/mortal.genie examples/08_eternal_sleep.wish \
             | grep -q 'Life(fooled)'
           echo "Appendix A and B verdicts hold."
+
+  sanitizers:
+    # The searcher walks millions of programs, so a latent out-of-bounds read
+    # can sit in a branch that only some platforms happen to survive. One did:
+    # expandProgram indexed the operation table with -1 for a promise, which
+    # was harmless on macOS and a segfault on Linux. Bounds are kept small here
+    # because ASan/UBSan cost roughly an order of magnitude in speed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with ASan + UBSan
+        run: |
+          g++ -std=c++17 -g -O1 -fsanitize=address,undefined \
+              -fno-sanitize-recover=all wishc.cpp -o wishc-san
+      - name: Judge every example
+        run: |
+          set -e
+          for f in examples/*.wish; do
+            g=$(sed -n 's/^# genie: *//p' "$f" | head -1)
+            ./wishc-san ${g:+--genie $g} "$f" > /dev/null || [ $? -eq 1 ]
+          done
+      - name: Search every world
+        run: |
+          set -e
+          ./wishc-san --hunt examples/01_humble.wish --max-stmts 2 --max-wishes 3 >/dev/null || [ $? -eq 1 ]
+          ./wishc-san --genie genie/mortal.genie  --hunt examples/08_eternal_sleep.wish --max-stmts 2 --max-wishes 2 >/dev/null || [ $? -eq 1 ]
+          ./wishc-san --genie genie/vigil.genie   --hunt examples/04_nobody.wish        --max-stmts 2 --max-wishes 2 >/dev/null || [ $? -eq 1 ]
+          ./wishc-san --genie genie/careful.genie --hunt examples/08_eternal_sleep.wish --max-stmts 2 --max-wishes 2 >/dev/null || [ $? -eq 1 ]
