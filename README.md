@@ -55,7 +55,14 @@ wish experiment_again {
 
 ## 跑跑看
 
-從頭手刻，無外部函式庫，只要一個 C++17 編譯器：
+下載編好的（[Releases](https://github.com/rayhuang2006/Loophole/releases)，Linux 和 macOS）：
+
+```bash
+curl -L -o loophole https://github.com/rayhuang2006/Loophole/releases/latest/download/loophole-1.1.0-macos-arm64
+chmod +x loophole && sudo mv loophole /usr/local/bin/
+```
+
+或者自己編。從頭手刻，無外部函式庫，只要一個 C++17 編譯器：
 
 ```bash
 make

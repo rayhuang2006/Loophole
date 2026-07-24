@@ -1,0 +1,142 @@
+name: Release
+
+# Runs on a version tag and attaches built binaries to the GitHub release.
+#
+# The manual trigger exists because a tag is a one-shot event: if this workflow
+# is broken, you cannot re-run it without burning another version number. Give
+# `tag` an existing tag to build and publish for it.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and publish (blank = build only, publish nothing)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write        # needed to create the release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x86_64
+            # Statically linked, so it does not depend on the glibc of whichever
+            # runner image built it. The program opens no shared libraries.
+            flags: -static
+          - os: macos-latest
+            target: macos-arm64
+            flags: -mmacosx-version-min=11.0
+          - os: macos-13
+            target: macos-x86_64
+            flags: -mmacosx-version-min=10.15
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Build
+        run: c++ -std=c++17 -O2 -Wall -Wextra -Werror ${{ matrix.flags }} loophole.cpp -o loophole
+
+      - name: Smoke test the binary we are about to ship
+        run: |
+          # Never publish a binary nobody ran. The regression suite is the same
+          # one CI gates on, so a binary that passes it judges every shipped
+          # example exactly as the goldens say it should.
+          ./loophole --version
+          ./ci/check.sh
+
+      - name: Check the binary is the one we built
+        # The smoke test runs `make`, which would happily rebuild with default
+        # flags if it decided the binary was stale — and then we would ship a
+        # dynamically linked Linux binary that dies on any older glibc. Assert
+        # the property directly rather than trusting timestamps.
+        if: matrix.target == 'linux-x86_64'
+        run: |
+          file loophole
+          file loophole | grep -q 'statically linked' \
+            || { echo "::error::the Linux binary is not static"; exit 1; }
+
+      - name: Package
+        run: |
+          version="${{ github.event.inputs.tag || github.ref_name }}"
+          name="loophole-${version#v}-${{ matrix.target }}"
+          mv loophole "$name"
+          if command -v sha256sum >/dev/null; then sha256sum "$name" > "$name.sha256"
+          else shasum -a 256 "$name" > "$name.sha256"; fi
+          cat "$name.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: loophole-*
+
+  publish:
+    needs: build
+    # Only a tag produces a release. A bare manual run stops after `build`, so
+    # the workflow can be tested without publishing anything.
+    if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Collect checksums
+        run: |
+          cd dist
+          cat *.sha256 > SHA256SUMS
+          rm -f *.sha256
+          ls -l
+
+      - name: Build the release notes from the changelog
+        run: |
+          version="${{ github.event.inputs.tag || github.ref_name }}"
+          python3 - "$version" <<'PY' > notes.md
+          import re, sys, pathlib
+          version = sys.argv[1].lstrip('v')
+          text = pathlib.Path('CHANGELOG.md').read_text()
+          # The section for this version, up to the next top-level heading.
+          m = re.search(r'^## loophole %s\b.*?$(.*?)(?=^## |\Z)' % re.escape(version),
+                        text, re.S | re.M)
+          print(m.group(1).strip() if m else '_No changelog entry for this version._')
+          print()
+          print('### Install')
+          print()
+          print('```bash')
+          print('curl -L -o loophole \\')
+          print('  https://github.com/rayhuang2006/Loophole/releases/download/'
+                'v%s/loophole-%s-macos-arm64' % (version, version))
+          print('chmod +x loophole && sudo mv loophole /usr/local/bin/')
+          print('```')
+          print()
+          print('Swap the filename for your platform. `curl` does not set the '
+                'macOS quarantine flag, so the binary runs as downloaded; a '
+                'browser download does set it, and needs '
+                '`xattr -d com.apple.quarantine loophole` first.')
+          print()
+          print('Or build it yourself — one file, no dependencies, any C++17 '
+                'compiler: `make && sudo make install`.')
+          PY
+          cat notes.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${{ github.event.inputs.tag || github.ref_name }}"
+          gh release create "$version" dist/* \
+            --title "$version" \
+            --notes-file notes.md \
+            --verify-tag
