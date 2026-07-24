@@ -15,7 +15,9 @@ make
 一個 `.wish` 檔分兩半：先描述世界，再寫願望。
 
 ```wish
-register wishes : uint<2> = 3
+register  wishes    : uint<2> = 3
+attribute heartbeat : uint<4> = 15
+attribute brainwave : uint<4> = 15
 people    alice, bob, rival
 
 wish nothing {
@@ -23,7 +25,8 @@ wish nothing {
 ```
 
 第一行：一個叫 `wishes` 的暫存器，兩個位元寬（只放得下 0 到 3），初始值 3。
-第二行：世界上有三個人，一開始都活著。
+中間兩行：宣告每個人有哪些屬性（心跳、腦波），預設值 15。
+第四行：世界上有三個人，每個人一開始都帶著這些屬性的預設值。
 然後一個什麼都不做的願望。
 
 存成 `my.wish` 跑跑看：
@@ -34,15 +37,18 @@ wish nothing {
 
 你會看到即使願望是空的，`wishes` 還是從 3 掉到 2——那是過路費，每施一次都要付。
 
-### 五個操作
+### 六個操作
 
 | 寫法 | 做什麼 |
 | --- | --- |
 | `sub wishes, 3` | 減 3（會繞回，不會變負數） |
 | `add wishes, 3` | 加 3（會繞回） |
 | `widen wishes -> uint<64>` | 改位寬，值不動 |
-| `kill alice` | 把 alice 的存活狀態設成 0 |
-| `revive alice` | 設成 1 |
+| `set alice.brainwave, 0` | 把 alice 的某個屬性設成一個值 |
+| `kill alice` | 把 alice 的每個屬性都設成 0 |
+| `revive alice` | 把每個屬性設回宣告的預設值 |
+
+（要有屬性可設，得先 `attribute brainwave : uint<4> = 15` 宣告它。）
 
 試著在願望裡塞一個 `sub wishes, 3`，看看發生什麼：
 
@@ -180,8 +186,9 @@ rule R2 {
 - `surface` = 看你**交上去的原文**。取個小名就繞過了。
 - `ast` = 看**機器真正要跑的程式**。取小名沒有用。
 
-把 R2 的 `surface` 改成 `ast` 存檔，再跑一次 `examples/03_tidy.wish`——
-笑話 #3 當場失效。
+`genie/mortal.genie` 的禁字規則是 `surface`；把它改成 `ast` 存檔，
+再跑一次 `examples/08_eternal_sleep.wish`——別名那一招當場失效。
+（`genie/careful.genie` 就是這個改法。）
 
 `forbid X on Y` 是「只在目標是 Y 的時候才擋」，R1 用的就是這個
 （只禁對 `wishes` 做 add，對別的暫存器隨你）。
@@ -260,22 +267,22 @@ invariant I2 {
 寫完之後，問一個以前問不了的問題：**我這個精靈有幾個洞？**
 
 ```bash
-./wishc --genie mine.genie --hunt examples/03_tidy.wish --max-stmts 3 --max-wishes 3
+./wishc --genie mine.genie --hunt examples/08_eternal_sleep.wish --max-stmts 2 --max-wishes 2
 ```
 
-它會窮舉所有可能的願望，回報有幾種不同的破法。拿來比較：
+它會窮舉所有可能的願望，回報有幾種不同的破法。拿死亡世界的兩個精靈比：
 
 ```bash
-# 預設的精靈
-./wishc --hunt examples/03_tidy.wish --max-stmts 3 --max-wishes 3 | grep found
-# 記取教訓的精靈
-./wishc --genie genie/careful.genie --hunt examples/03_tidy.wish --max-stmts 3 --max-wishes 3 | grep found
+# 死亡精靈
+./wishc --genie genie/mortal.genie  --hunt examples/08_eternal_sleep.wish --max-stmts 2 --max-wishes 2 | grep found
+# 記取教訓的（禁字提到 ast 層）
+./wishc --genie genie/careful.genie --hunt examples/08_eternal_sleep.wish --max-stmts 2 --max-wishes 2 | grep found
 ```
 
-九種對六種。差的三種正好是別名相關的那些。
+兩種對一種。死掉的是別名那條；活著的是永眠那條——因為堵得住一個字，堵不住所有傷害。
 
-**注意那個數字的意思**：`--max-stmts 3 --max-wishes 3` 是搜尋的框，
-「九種」的完整意思是「**在這個框裡**有九種」。想確認框夠大，
+**注意那個數字的意思**：`--max-stmts 2 --max-wishes 2` 是搜尋的框，
+「兩種」的完整意思是「**在這個框裡**有兩種」。想確認框夠大，
 就把數字調大再跑一次——結果沒變的話，框本來就夠了。
 
 ---

@@ -58,22 +58,23 @@ wish experiment_again {
 ```bash
 make
 ./wishc examples/01_humble.wish
-make run                          # 跑過全部八個例子
+make run                          # 跑過全部例子（自動帶對的精靈）
 ```
 
-八個例子，一個比一個歪：
+一個比一個歪：
 
 | 檔案 | 招式 |
 | --- | --- |
 | `00_naive.wish` | 直接許願要更多願望。當場被擋 |
 | `01_humble.wish` | 「我還你三個。」下溢 |
 | `02_more_shelf.wish` | 「我只是想要更大的架子。」換個箱子再下溢 |
-| `03_tidy.wish` | 精靈禁止 kill，那就給它取個小名 |
-| `04_nobody.wish` | 沒辦法讓死人復活，那就重新定義「所有人」 |
+| `07_the_original.wish` | 上面那個，原版笑話三個願望一字不差 |
 | `05_liar.wish` | 「我保證這個願望永遠不會被實現。」 |
 | `06_next_one.wish` | 不用談自己，一樣能把精靈逼進矛盾 |
-| `07_the_original.wish` | 上面那個，原版笑話三個願望一字不差 |
+| `04_nobody.wish` | 沒辦法讓死人復活，那就重新定義「所有人」（配 `genie/vigil.genie`） |
+| `08_eternal_sleep.wish` | 精靈只禁「死」，那就讓他永遠睡著（配 `genie/mortal.genie`） |
 
+有些例子需要特定的精靈——檔案開頭的 `# genie:` 那行會告訴 `make run` 要載入哪一個。
 每一招的完整拆解在 [笑話清單](docs/guide/jokes.md)。
 
 ---
@@ -115,19 +116,23 @@ wish w4 { }
 ./wishc --genie mine.genie examples/01_humble.wish
 ```
 
-`genie/careful.genie` 是一個記取教訓的精靈。規矩的**字面意思一個字都沒改**，
-只調整了它把守衛放在哪裡。結果上面那些笑話一半當場失效：
+`genie/careful.genie` 是一個記取教訓的死亡精靈。規矩的**字面意思一個字都沒改**——
+一樣禁 kill，一樣守「沒有人死」——只把禁字檢查從「看你寫的字」提到「看展開後的程式」：
 
 ```
-$ ./wishc --genie genie/careful.genie examples/03_tidy.wish
+$ ./wishc --genie genie/careful.genie examples/08_eternal_sleep.wish
 
 wish tidy {
-    STATUS:  ILLEGAL — R2: wish invokes 'kill' — that deed is not done here,
-                       whatever you call it
+    STATUS:  ILLEGAL — NoKilling: wish invokes 'kill' —
+                       that deed is not done here, whatever you call it
 }
 ```
 
-而且失效的是哪一半，`--hunt` 量得出來：預設的精靈有九種漏洞，這個只剩六種。
+取小名沒有用了。而且死掉的是哪條漏洞，`--hunt` 量得出來——
+`genie/mortal.genie` 有兩種漏洞（別名殺人、永遠睡著），`careful` 只剩一種：
+
+**別名那條死了，永眠那條活著。** 因為你堵得住一個字，堵不住「所有的傷害」——
+永眠不在精靈禁的字裡，它是規則從沒提到的一種狀態。
 
 ---
 

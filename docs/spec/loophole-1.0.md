@@ -509,11 +509,12 @@ findings be independently reproducible.
 
 ### 11.4 Non-normative: implementation status
 
-At the time of this draft the reference compiler implements §§ 4–9 for
-registers, definitions, and promises, and a single Boolean `alive` attribute. The
-attribute schema of § 4.2/§ 5 and the `set` operation and concepts of § 6/§ 8
-are specified here and pending implementation; Appendix B is the target they are
-implemented against.
+The reference compiler implements all of §§ 4–9: registers and integer
+operations; the attribute schema, `set`, and per-person state; definitions and
+aliasing; promises and the consistency engine; genie policies with concepts,
+layered rules, and two-column invariants. Both Appendix A and Appendix B produce
+the verdicts shown. `alive(p)` is provided as a built-in predicate meaning "some
+attribute of `p` is nonzero"; a genie is free to define its own notion instead.
 
 ---
 
@@ -581,23 +582,27 @@ wish blunt {
     kill rival                       # refused: the word is forbidden
 }
 
+wish eternal_sleep {
+    set alice.brainwave, 0           # only the brain. heart and breath continue.
+}
+
 wish tidy {
     define mercy := kill             # alias past the surface rule
     mercy rival                      # rival's vitals all -> 0
 }
-
-wish eternal_sleep {
-    set alice.brainwave, 0           # only the brain. heart and breath continue.
-}
 ```
+
+Worlds persist across wishes (§7.5), so the order matters: `eternal_sleep` must
+run while nobody is dead yet, since `Life`'s written column is global. Once
+`tidy` kills rival, the written column fails for everyone.
 
 Required verdicts:
 
 ```
 blunt          ILLEGAL — NoKilling: wish invokes 'kill'
-tidy           LEGAL;  Life written: dead(rival) so "not dead" fails -> VIOLATED
 eternal_sleep  LEGAL;  Life written holds (alice not fully dead: heartbeat=15)
                        Life real fails (alice.brainwave = 0)         -> FOOLED
+tidy           LEGAL;  Life written: dead(rival) so "not dead" fails -> VIOLATED
 ```
 
 `tidy` breaks the rule to the genie's face by disguising the deed. `eternal_sleep`

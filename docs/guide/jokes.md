@@ -272,26 +272,32 @@ wish w4 { }
 
 ## 那要怎麼堵？
 
-`genie/careful.genie` 是一個記取教訓的精靈。
-規矩的**字面意思一個字都沒改**，只調整了兩件事：
-
-- R2 從看「你寫的字」改成看「展開後的程式」
-- I3 從量化在可重綁的 `everyone` 上，改成量化在不可改的 `people` 上
+`genie/careful.genie` 是一個記取教訓的死亡精靈。
+規矩的**字面意思一個字都沒改**——一樣禁 kill、一樣守「沒有人死」——
+只把禁字檢查從看「你寫的字」（surface）改成看「展開後的程式」（ast）。
 
 ```bash
-./wishc --genie genie/careful.genie examples/03_tidy.wish
+./wishc --genie genie/careful.genie examples/08_eternal_sleep.wish
 ```
 ```
 wish tidy {
-    STATUS:  ILLEGAL — R2: wish invokes 'kill' — that deed is not done here,
-                       whatever you call it
+    STATUS:  ILLEGAL — NoKilling: wish invokes 'kill' —
+                       that deed is not done here, whatever you call it
 }
 ```
 
-笑話 3 和 4 當場失效。笑話 1、2、5、6 完全不受影響——
-因為它們鑽的是別的軸。用 `--hunt` 量：預設的精靈有九種漏洞，這個只剩六種。
+取小名沒有用了。用 `--hunt` 量給你看死掉的是哪一條：
 
-**改守衛盯著哪一層，剛好關掉一整條軸。** 這件事現在是量得出來的，不是嘴上說說。
+```bash
+./wishc --genie genie/mortal.genie  --hunt examples/08_eternal_sleep.wish --max-stmts 2 --max-wishes 2 | grep found
+./wishc --genie genie/careful.genie --hunt examples/08_eternal_sleep.wish --max-stmts 2 --max-wishes 2 | grep found
+```
+
+死亡精靈有**兩種**漏洞（別名殺人、永遠睡著），careful 只剩**一種**。
+
+**死掉的是別名那條，活著的是永眠那條。** 因為你堵得住一個字（別名），
+堵不住「所有的傷害」（永眠是規則從沒提到的一種狀態）——這正是黑名單永遠列不完的道理。
+改守衛盯著哪一層，關得掉別名那條軸；但覆蓋不足那條，改層次救不了。
 
 ---
 
