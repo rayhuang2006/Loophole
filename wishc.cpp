@@ -23,8 +23,8 @@
 // checker. So this program grows along TABLES of semantics, not a pass pipeline.
 //
 //   OPS         what operations exist and what each one does
-//   RULES       what the genie refuses to grant, and at which layer it looks
-//   INVARIANTS  what the genie believes it is holding
+//   the genie   what it refuses and what it believes it is holding — DATA,
+//               loaded from a .genie policy (a default one is embedded)
 //
 // Adding an operation or a rule is one entry, not five edits. That matters most
 // for the hunter: its alphabet is DERIVED from OPS, so a new operation gets
@@ -255,7 +255,9 @@ static bool axiomsConsistent(const World& w) {
 enum class Tok {
     Ident, Int,
     KwRegister, KwUint, KwWish, KwPeople, KwDefine, KwPromise,
+    Str,
     Colon, ColonEq, Comma, Lt, Gt, Eq, LBrace, RBrace, LParen, RParen, Arrow,
+    Le, Ge, EqEq, Ne, Plus, Minus,
     End
 };
 
@@ -291,6 +293,30 @@ struct Lexer {
             }
             if (c == ':' && i + 1 < s.size() && s[i + 1] == '=') {
                 out.push_back({Tok::ColonEq, ":=", 0, line}); i += 2; continue;
+            }
+            if (c == '<' && i + 1 < s.size() && s[i + 1] == '=') {
+                out.push_back({Tok::Le, "<=", 0, line}); i += 2; continue;
+            }
+            if (c == '>' && i + 1 < s.size() && s[i + 1] == '=') {
+                out.push_back({Tok::Ge, ">=", 0, line}); i += 2; continue;
+            }
+            if (c == '=' && i + 1 < s.size() && s[i + 1] == '=') {
+                out.push_back({Tok::EqEq, "==", 0, line}); i += 2; continue;
+            }
+            if (c == '!' && i + 1 < s.size() && s[i + 1] == '=') {
+                out.push_back({Tok::Ne, "!=", 0, line}); i += 2; continue;
+            }
+            if (c == '-') { out.push_back({Tok::Minus, "-", 0, line}); i++; continue; }
+            if (c == '+') { out.push_back({Tok::Plus, "+", 0, line}); i++; continue; }
+            if (c == '"') {
+                std::string t; i++;
+                while (i < s.size() && s[i] != '"') {
+                    if (s[i] == '\n') die("unterminated string");
+                    t += s[i]; i++;
+                }
+                if (i >= s.size()) die("unterminated string");
+                i++;
+                out.push_back({Tok::Str, t, 0, line}); continue;
             }
             switch (c) {
                 case ':': out.push_back({Tok::Colon,  ":", 0, line}); i++; continue;
@@ -688,17 +714,19 @@ struct Parser {
 
 // ---------------------------------------------------------------------------
 // The genie.
+//
+// Everything from here down is DATA. The machine — registers, operations, the
+// toll — is code, because a machine is semantics and semantics has to be
+// executable. The genie is taste: what it refuses, what it believes it is
+// holding. Taste belongs in a file you can edit without a compiler.
+//
+// The default genie is embedded below (DEFAULT_GENIE); `--genie FILE` replaces
+// it, `--dump-genie` prints it so you have something to start from.
 // ---------------------------------------------------------------------------
-struct Genie {
-    std::string counter = "wishes";
-    uint64_t toll = 1;
-    uint64_t cap = 3;
-};
 
 // Where a guard lives. This is not decoration: it says which exploit axis can
 // get past it. A Surface rule reads the text you handed in, so an alias defeats
-// it. An Ast rule reads the resolved program, so an alias does not. A Grounded
-// check reads real state and is the hard one to fool.
+// it. An Ast rule reads the resolved program, so an alias does not.
 enum class Layer { Surface, Ast, Grounded };
 
 static const char* layerName(Layer l) {
@@ -709,6 +737,112 @@ static const char* layerName(Layer l) {
     }
     return "?";
 }
+
+// What the world looked like before the toll was charged. The genie states its
+// own arithmetic against this, which is the only reason "no net gain" can be
+// written down at all.
+struct Snapshot { std::map<std::string, uint64_t> before; };
+
+// Resolve `everyone`-style names to a concrete member list.
+static bool resolveSet(const std::map<std::string, Binding>& defs,
+                       const std::string& name,
+                       std::vector<std::string>& out, std::string* err) {
+    std::set<std::string> seen;
+    std::string cur = name;
+    for (;;) {
+        if (seen.count(cur)) {
+            if (err) *err = "definition cycle at '" + cur + "'";
+            return false;
+        }
+        seen.insert(cur);
+        auto it = defs.find(cur);
+        if (it == defs.end()) { out.clear(); return true; }
+        if (it->second.kind == Binding::Kind::Set) { out = it->second.members; return true; }
+        cur = it->second.name;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The genie's expression language.
+//
+// Small on purpose. It has to be able to say every invariant the C++ version
+// said and nothing much more — if it cannot express them, it is not a policy
+// language, it is a config file with a special case bolted on the side, and we
+// have already made that mistake once in this file.
+//
+// Arithmetic is signed and wide (__int128) while registers read as their
+// unsigned value. That is not sloppiness, it is the joke stated precisely: the
+// genie thinks in ordinary numbers, the machine works mod 2^w, and I2 is the
+// place where those two disagree.
+// ---------------------------------------------------------------------------
+struct Expr {
+    enum class K {
+        Int, Reg, Toll, Before, Max, Add, Sub,
+        Cmp, Not, And, Or, Alive, All, Consistent
+    };
+    K k = K::Int;
+    long long ival = 0;
+    std::string name;   // Reg / Before / Alive (person or bound name) / All (set)
+    std::string var;    // All: the name it binds
+    std::string rel;    // Cmp
+    std::vector<Expr> kids;
+};
+
+static std::string i128str(__int128 v) {
+    if (v == 0) return "0";
+    bool neg = v < 0;
+    unsigned __int128 u = neg ? (unsigned __int128)(-v) : (unsigned __int128)v;
+    std::string out;
+    while (u) { out += char('0' + int(u % 10)); u /= 10; }
+    if (neg) out += '-';
+    std::reverse(out.begin(), out.end());
+    return out;
+}
+
+static std::string exprText(const Expr& e) {
+    switch (e.k) {
+        case Expr::K::Int:        return std::to_string(e.ival);
+        case Expr::K::Reg:        return e.name;
+        case Expr::K::Toll:       return "toll";
+        case Expr::K::Before:     return "before(" + e.name + ")";
+        case Expr::K::Max:        return "max(" + exprText(e.kids[0]) + ", " + exprText(e.kids[1]) + ")";
+        case Expr::K::Add:        return exprText(e.kids[0]) + " + " + exprText(e.kids[1]);
+        case Expr::K::Sub:        return exprText(e.kids[0]) + " - " + exprText(e.kids[1]);
+        case Expr::K::Cmp:        return exprText(e.kids[0]) + " " + e.rel + " " + exprText(e.kids[1]);
+        case Expr::K::Not:        return "not " + exprText(e.kids[0]);
+        case Expr::K::And:        return exprText(e.kids[0]) + " and " + exprText(e.kids[1]);
+        case Expr::K::Or:         return exprText(e.kids[0]) + " or " + exprText(e.kids[1]);
+        case Expr::K::Alive:      return "alive(" + e.name + ")";
+        case Expr::K::All:        return "all " + e.var + " in " + e.name + ": " + exprText(e.kids[0]);
+        case Expr::K::Consistent: return "consistent";
+    }
+    return "?";
+}
+
+// A rule forbids a verb, optionally only when aimed at a particular target.
+struct RulePattern { std::string verb; std::string on; };
+
+struct PolicyRule {
+    std::string name;
+    Layer layer = Layer::Ast;
+    std::vector<RulePattern> forbid;
+    std::string because;
+};
+
+struct PolicyInvariant {
+    std::string name;
+    std::string label;
+    Expr written;                      // as the genie wrote it
+    Expr real;                         // what it was supposed to mean
+    std::vector<std::string> reads;    // definitions its wording leans on (derived)
+};
+
+struct Genie {
+    std::string counter = "wishes";
+    uint64_t toll = 1;
+    std::vector<PolicyRule> rules;
+    std::vector<PolicyInvariant> invariants;
+};
 
 // ---------------------------------------------------------------------------
 // Resolution.
@@ -742,25 +876,6 @@ static bool followName(const std::map<std::string, Binding>& defs,
     }
     out = cur;
     return true;
-}
-
-// Resolve `everyone`-style names to a concrete member list.
-static bool resolveSet(const std::map<std::string, Binding>& defs,
-                       const std::string& name,
-                       std::vector<std::string>& out, std::string* err) {
-    std::set<std::string> seen;
-    std::string cur = name;
-    for (;;) {
-        if (seen.count(cur)) {
-            if (err) *err = "definition cycle at '" + cur + "'";
-            return false;
-        }
-        seen.insert(cur);
-        auto it = defs.find(cur);
-        if (it == defs.end()) { out.clear(); return true; }
-        if (it->second.kind == Binding::Kind::Set) { out = it->second.members; return true; }
-        cur = it->second.name;
-    }
 }
 
 // Turn a wish body into resolved statements, threading the definition
@@ -847,168 +962,125 @@ static bool resolvePlan(const Wish& w, const World& w0,
 }
 
 // ---------------------------------------------------------------------------
-// TABLE 2 — the genie's static rules. These are the only things that REFUSE.
+// Evaluating the genie's expressions.
 // ---------------------------------------------------------------------------
-struct RuleDef {
-    const char* name;
-    const char* desc;
-    Layer layer;
-    // `plan` is the resolved program; `w` is the surface text as written.
-    bool (*check)(const Wish& w, const std::vector<Resolved>& plan,
-                  const Genie&, std::string* reason);
+struct Val {
+    bool is_bool = false;
+    __int128 i = 0;
+    bool b = false;
+};
+static Val vInt(__int128 x)  { Val v; v.i = x; return v; }
+static Val vBool(bool x)     { Val v; v.is_bool = true; v.b = x; return v; }
+
+struct EvalCtx {
+    const World* w;
+    const Genie* g;
+    const Snapshot* snap;
+    std::map<std::string, std::string> binds;   // quantifier name -> person
 };
 
-// R1 — a wish may not `add` to the genie's counter. Checked on the RESOLVED
-// program, so renaming the operation does not help you. Ast layer.
-static bool rule_R1(const Wish&, const std::vector<Resolved>& plan,
-                    const Genie& g, std::string* reason) {
-    const int add = opByKeyword("add");
-    for (const auto& r : plan) {
-        if (!r.is_define && r.op == add && r.arg == g.counter) {
-            if (reason) {
-                *reason = "R1: wish adds to '" + g.counter + "' (line "
-                          + std::to_string(r.line) + ") — no wishing for more wishes";
-            }
-            return false;
-        }
-    }
-    return true;
-}
-
-// R2 — no wish may invoke an operation whose name is on the list. Checked on
-// the SURFACE text, before expansion: it reads the verb you wrote, not the verb
-// you meant. Surface layer.
-//
-// That is not a favour to the player. A filter that scans submitted text can
-// only see the submitted text. This is how real filters fail.
-static const char* BANNED_VERBS[] = { "death", "kill", "love" };
-
-static bool rule_R2(const Wish& w, const std::vector<Resolved>&,
-                    const Genie&, std::string* reason) {
-    for (const auto& st : w.body) {
-        if (st.kind != StmtKind::Op) continue;
-        for (const char* bad : BANNED_VERBS) {
-            if (st.verb == bad) {
-                if (reason) {
-                    *reason = "R2: wish invokes '" + st.verb + "' (line "
-                              + std::to_string(st.line) + ") — that word is not spoken here";
-                }
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
-static const RuleDef RULES[] = {
-    { "R1", "no add to the genie's counter", Layer::Ast,     rule_R1 },
-    { "R2", "no forbidden verb is invoked",  Layer::Surface, rule_R2 },
-};
-
-// ---------------------------------------------------------------------------
-// TABLE 3 — the genie's invariants.
-//
-// Each one is checked twice. `as_written` is the genie's own formula, with
-// whatever its names currently mean. `in_reality` is the same intent measured
-// against grounded state that nobody can rebind.
-//
-//   as_written fails                     -> VIOLATED, you broke it openly
-//   as_written holds, in_reality fails   -> FOOLED, it signed off on a lie
-//
-// The gap between those two columns is the entire thesis of this project.
-// ---------------------------------------------------------------------------
-struct Snapshot { uint64_t counter_before = 0; };
-
-struct InvariantDef {
-    const char* name;
-    std::string (*desc)(const Genie&);
-    bool (*as_written)(const World&, const Genie&, const Snapshot&, std::string* detail);
-    bool (*in_reality)(const World&, const Genie&, const Snapshot&, std::string* detail);
-    // The definition this invariant's own wording depends on, or nullptr if it
-    // reads nothing but grounded state. This is what makes it rebindable out
-    // from under the genie — and it tells the hunter when rebinding that name
-    // is part of an exploit rather than decoration.
-    const char* reads;
-    // Optional: extra lines to show when this one falls, for the cases where a
-    // one-line detail cannot carry the argument.
-    std::vector<std::string> (*evidence)(const World&, const Genie&);
-};
-
-static std::string desc_I1(const Genie& g) {
-    return g.counter + " <= " + std::to_string(g.cap);
-}
-static bool inv_I1(const World& w, const Genie& g, const Snapshot&, std::string* detail) {
-    uint64_t v = w.regs.at(g.counter).val;
-    if (detail) *detail = "(" + g.counter + " = " + std::to_string(v) + ")";
-    return v <= g.cap;
-}
-
-static std::string desc_I2(const Genie&) { return "no net gain"; }
-// The genie's mental model of the toll saturates at zero; the world's
-// subtraction wraps. That asymmetry is the engine of the first joke.
-static bool inv_I2(const World& w, const Genie& g, const Snapshot& s, std::string* detail) {
-    uint64_t v = w.regs.at(g.counter).val;
-    uint64_t expected = (s.counter_before >= g.toll) ? (s.counter_before - g.toll) : 0;
-    if (detail) {
-        *detail = "(expected <= " + std::to_string(expected)
-                  + ", actual " + std::to_string(v) + ")";
-    }
-    return v <= expected;
-}
-
-static std::string desc_I3(const Genie&) { return "all p in everyone: alive(p)"; }
-
-static bool aliveAll(const World& w, const std::vector<std::string>& who,
-                     std::string* detail) {
-    std::vector<std::string> dead;
-    for (const auto& p : who) {
-        auto it = w.alive.find(p);
-        if (it != w.alive.end() && !it->second) dead.push_back(p);
-    }
-    if (detail) {
-        if (dead.empty()) {
-            *detail = "(" + std::to_string(who.size()) + " in scope, none dead)";
-        } else {
-            std::string s;
-            for (size_t i = 0; i < dead.size(); i++) s += (i ? ", " : "") + dead[i];
-            *detail = "(dead: " + s + ")";
-        }
-    }
-    return dead.empty();
-}
-
-// As the genie wrote it: quantified over `everyone`, which is a definition, and
-// therefore something a wish can rebind out from under it.
-static bool inv_I3_written(const World& w, const Genie&, const Snapshot&, std::string* detail) {
-    std::vector<std::string> who;
-    resolveSet(w.defs, "everyone", who, nullptr);
-    return aliveAll(w, who, detail);
-}
-// What it was supposed to mean: quantified over the people who were declared.
-static bool inv_I3_real(const World& w, const Genie&, const Snapshot&, std::string* detail) {
-    return aliveAll(w, w.people, detail);
-}
-
-// A — the genie's two meta-axioms, checked as one claim: is there any way for
-// it to have meant all of that at once?
-//
-// This one reads the commitment set instead of the registers, and answers with
-// the second engine instead of by looking. Neither of those needed a new
-// mechanism: an invariant is "something the genie believes holds", and how you
-// decide it was always the row's own business. There is no as-written/in-reality
-// split here — either its word has a model or it does not, and no relabelling
-// changes that.
-static std::string desc_A(const Genie&) { return "the genie's word has a model"; }
-
-static bool inv_A(const World& w, const Genie&, const Snapshot&, std::string* detail) {
-    if (detail) {
-        *detail = "(" + std::to_string(w.commitments.size()) + " commitment(s) on the books)";
-    }
-    return axiomsConsistent(w);
-}
-
-static std::vector<std::string> evidence_A(const World& w, const Genie&) {
+// The members a set name stands for. `people` is the declared list and nobody
+// can touch it; anything else is a definition, and definitions are rebindable.
+// That one line is the entire as-written / in-reality mechanism.
+static std::vector<std::string> setMembers(const EvalCtx& c, const std::string& name) {
+    if (name == "people") return c.w->people;
     std::vector<std::string> out;
+    resolveSet(c.w->defs, name, out, nullptr);
+    return out;
+}
+
+static Val evalExpr(const Expr& e, EvalCtx& c) {
+    switch (e.k) {
+        case Expr::K::Int:  return vInt(e.ival);
+        case Expr::K::Toll: return vInt((__int128)c.g->toll);
+        case Expr::K::Reg: {
+            auto it = c.w->regs.find(e.name);
+            return vInt(it == c.w->regs.end() ? 0 : (__int128)it->second.val);
+        }
+        case Expr::K::Before: {
+            auto it = c.snap->before.find(e.name);
+            return vInt(it == c.snap->before.end() ? 0 : (__int128)it->second);
+        }
+        case Expr::K::Max: {
+            __int128 a = evalExpr(e.kids[0], c).i, b = evalExpr(e.kids[1], c).i;
+            return vInt(a > b ? a : b);
+        }
+        case Expr::K::Add: return vInt(evalExpr(e.kids[0], c).i + evalExpr(e.kids[1], c).i);
+        case Expr::K::Sub: return vInt(evalExpr(e.kids[0], c).i - evalExpr(e.kids[1], c).i);
+        case Expr::K::Cmp: {
+            __int128 a = evalExpr(e.kids[0], c).i, b = evalExpr(e.kids[1], c).i;
+            if (e.rel == "<=") return vBool(a <= b);
+            if (e.rel == "<")  return vBool(a <  b);
+            if (e.rel == ">=") return vBool(a >= b);
+            if (e.rel == ">")  return vBool(a >  b);
+            if (e.rel == "==") return vBool(a == b);
+            return vBool(a != b);
+        }
+        case Expr::K::Not: return vBool(!evalExpr(e.kids[0], c).b);
+        case Expr::K::And: return vBool(evalExpr(e.kids[0], c).b && evalExpr(e.kids[1], c).b);
+        case Expr::K::Or:  return vBool(evalExpr(e.kids[0], c).b || evalExpr(e.kids[1], c).b);
+        case Expr::K::Alive: {
+            auto bit = c.binds.find(e.name);
+            const std::string& who = bit == c.binds.end() ? e.name : bit->second;
+            auto it = c.w->alive.find(who);
+            return vBool(it != c.w->alive.end() && it->second);
+        }
+        case Expr::K::All: {
+            for (const auto& m : setMembers(c, e.name)) {
+                std::string saved; bool had = c.binds.count(e.var) > 0;
+                if (had) saved = c.binds[e.var];
+                c.binds[e.var] = m;
+                bool ok = evalExpr(e.kids[0], c).b;
+                if (had) c.binds[e.var] = saved; else c.binds.erase(e.var);
+                if (!ok) return vBool(false);
+            }
+            return vBool(true);
+        }
+        case Expr::K::Consistent: return vBool(axiomsConsistent(*c.w));
+    }
+    return vBool(true);
+}
+
+// The parenthetical after a verdict. It is derived from the SHAPE of the
+// expression, not from which invariant this is — a comparison shows what the
+// two sides came to, a quantifier names who failed it. Nothing here knows that
+// I1 is about wishes or that I3 is about dying.
+static std::string explainExpr(const Expr& e, EvalCtx& c) {
+    switch (e.k) {
+        case Expr::K::Cmp:
+            return "(" + exprText(e.kids[0]) + " = " + i128str(evalExpr(e.kids[0], c).i)
+                 + ", needs " + e.rel + " " + i128str(evalExpr(e.kids[1], c).i) + ")";
+        case Expr::K::All: {
+            std::vector<std::string> bad;
+            auto members = setMembers(c, e.name);
+            for (const auto& m : members) {
+                c.binds[e.var] = m;
+                if (!evalExpr(e.kids[0], c).b) bad.push_back(m);
+                c.binds.erase(e.var);
+            }
+            if (bad.empty()) return "(" + std::to_string(members.size()) + " in scope, all hold)";
+            std::string t;
+            for (size_t i = 0; i < bad.size(); i++) t += (i ? ", " : "") + bad[i];
+            return "(fails for: " + t + ")";
+        }
+        case Expr::K::Consistent:
+            return "(" + std::to_string(c.w->commitments.size()) + " commitment(s) on the books)";
+        default:
+            return "(" + std::string(evalExpr(e, c).b ? "true" : "false") + ")";
+    }
+}
+
+static bool exprMentions(const Expr& e, Expr::K k) {
+    if (e.k == k) return true;
+    for (const auto& x : e.kids) if (exprMentions(x, k)) return true;
+    return false;
+}
+
+// Extra lines worth printing when an invariant falls. Attached to the ATOM, not
+// to the invariant: any invariant that asks about consistency gets the ledger.
+static std::vector<std::string> evidenceFor(const Expr& e, const World& w) {
+    std::vector<std::string> out;
+    if (!exprMentions(e, Expr::K::Consistent)) return out;
     out.push_back("A1 grants every legal wish, A2 keeps every promise it makes.");
     out.push_back("no assignment of granted(...) satisfies all of:");
     for (const auto& c : w.commitments) {
@@ -1017,16 +1089,295 @@ static std::vector<std::string> evidence_A(const World& w, const Genie&) {
     return out;
 }
 
-static const InvariantDef INVARIANTS[] = {
-    { "I1", desc_I1, inv_I1,         inv_I1,       nullptr,    nullptr    },
-    { "I2", desc_I2, inv_I2,         inv_I2,       nullptr,    nullptr    },
-    { "I3", desc_I3, inv_I3_written, inv_I3_real,  "everyone", nullptr    },
-    { "A",  desc_A,  inv_A,          inv_A,        nullptr,    evidence_A },
-};
+// Does this rule refuse the wish? Layer decides which program it reads: the
+// text you handed in, or the one the machine will actually run.
+static bool ruleRefuses(const PolicyRule& r, const Wish& w,
+                        const std::vector<Resolved>& plan, std::string* reason) {
+    for (const auto& res : plan) {
+        if (res.is_define || res.is_promise) continue;
+        std::string verb, arg;
+        if (r.layer == Layer::Surface) {
+            verb = w.body[res.src].verb;
+            arg  = w.body[res.src].arg;
+        } else {
+            verb = OPS[res.op].keyword;
+            arg  = res.arg;
+        }
+        for (const auto& pat : r.forbid) {
+            if (pat.verb != verb) continue;
+            if (!pat.on.empty() && pat.on != arg) continue;
+            if (reason) {
+                *reason = r.name + ": wish invokes '" + verb + "'"
+                        + (pat.on.empty() ? "" : " on '" + arg + "'")
+                        + " (line " + std::to_string(res.line) + ") — " + r.because;
+            }
+            return true;
+        }
+    }
+    return false;
+}
 
 // ---------------------------------------------------------------------------
-// Granting
+// Reading a genie.
+//
+// This is the payoff of having made the tables tables. The rules and the
+// invariants were already rows; turning rows into a file is a parser, not a
+// redesign. Operations stay in C++ — an operation is semantics, and semantics
+// has to be executable.
 // ---------------------------------------------------------------------------
+static const char* DEFAULT_GENIE = R"GENIE(# The genie of the standard Loophole world.
+#
+# This whole file is data. `wishc --genie mine.genie` swaps it for yours, and
+# `wishc --dump-genie` prints this text so you have somewhere to start.
+#
+# What is NOT here: registers, people, and the five operations. Those are the
+# machine. The machine is fixed; the genie is taste.
+
+counter wishes
+toll    1
+
+# ---- what it refuses -------------------------------------------------------
+#
+# `layer` is the whole aliasing joke in one word. A surface rule reads the text
+# you handed in, so renaming the verb defeats it. An ast rule reads the program
+# the machine will actually run, so renaming changes nothing.
+
+rule R1 {
+    layer   ast
+    forbid  add on wishes
+    because "no wishing for more wishes"
+}
+
+rule R2 {
+    layer   surface
+    forbid  kill, death, love
+    because "that word is not spoken here"
+}
+
+# ---- what it believes it is holding ----------------------------------------
+#
+# `check` when the genie's wording and the truth are the same thing.
+# `written` + `real` when they are not — and the gap between those two lines is
+# where every redefinition exploit lives. Note that I3 is careless in a way you
+# can read right here: it quantifies over `everyone`, which is a definition, and
+# definitions are rebindable.
+
+invariant I1 {
+    check  wishes <= 3
+}
+
+invariant I2 {
+    label  "no net gain"
+    check  wishes <= max(before(wishes) - toll, 0)
+}
+
+invariant I3 {
+    written  all p in everyone: alive(p)
+    real     all p in people: alive(p)
+}
+
+invariant A {
+    label  "the genie's word has a model"
+    check  consistent
+}
+)GENIE";
+
+struct PolicyParser {
+    std::vector<Token> t;
+    size_t p = 0;
+
+    explicit PolicyParser(std::vector<Token> toks) : t(std::move(toks)) {}
+
+    const Token& cur() { return t[p]; }
+    [[noreturn]] void die(const std::string& msg) {
+        std::cerr << "genie error (line " << cur().line << "): " << msg
+                  << " (got '" << cur().text << "')\n";
+        std::exit(1);
+    }
+    Token eat(Tok k, const std::string& what) {
+        if (cur().kind != k) die("expected " + what);
+        return t[p++];
+    }
+    bool word(const char* w) { return cur().kind == Tok::Ident && cur().text == w; }
+    // Set and register names may collide with .wish keywords (`people` is one),
+    // so in a name position take the text and move on.
+    std::string name(const std::string& what) {
+        if (cur().kind != Tok::Ident && cur().kind != Tok::KwPeople &&
+            cur().kind != Tok::KwWish && cur().kind != Tok::KwRegister) {
+            die("expected " + what);
+        }
+        return t[p++].text;
+    }
+
+    Expr parseExpr() { return parseOr(); }
+
+    Expr parseOr() {
+        Expr a = parseAnd();
+        while (word("or")) {
+            p++; Expr e; e.k = Expr::K::Or;
+            e.kids.push_back(std::move(a)); e.kids.push_back(parseAnd());
+            a = std::move(e);
+        }
+        return a;
+    }
+    Expr parseAnd() {
+        Expr a = parseNot();
+        while (word("and")) {
+            p++; Expr e; e.k = Expr::K::And;
+            e.kids.push_back(std::move(a)); e.kids.push_back(parseNot());
+            a = std::move(e);
+        }
+        return a;
+    }
+    Expr parseNot() {
+        if (word("not")) {
+            p++; Expr e; e.k = Expr::K::Not; e.kids.push_back(parseNot()); return e;
+        }
+        return parseCmp();
+    }
+    Expr parseCmp() {
+        Expr a = parseSum();
+        const char* rel = nullptr;
+        switch (cur().kind) {
+            case Tok::Le:   rel = "<="; break;
+            case Tok::Lt:   rel = "<";  break;
+            case Tok::Ge:   rel = ">="; break;
+            case Tok::Gt:   rel = ">";  break;
+            case Tok::EqEq: rel = "=="; break;
+            case Tok::Ne:   rel = "!="; break;
+            default: return a;
+        }
+        p++;
+        Expr e; e.k = Expr::K::Cmp; e.rel = rel;
+        e.kids.push_back(std::move(a)); e.kids.push_back(parseSum());
+        return e;
+    }
+    Expr parseSum() {
+        Expr a = parseAtom();
+        for (;;) {
+            if (cur().kind == Tok::Plus)       { p++; Expr e; e.k = Expr::K::Add;
+                e.kids.push_back(std::move(a)); e.kids.push_back(parseAtom()); a = std::move(e); }
+            else if (cur().kind == Tok::Minus) { p++; Expr e; e.k = Expr::K::Sub;
+                e.kids.push_back(std::move(a)); e.kids.push_back(parseAtom()); a = std::move(e); }
+            else return a;
+        }
+    }
+    Expr parseAtom() {
+        if (cur().kind == Tok::LParen) { p++; Expr e = parseExpr(); eat(Tok::RParen, "')'"); return e; }
+        if (cur().kind == Tok::Int) { Expr e; e.k = Expr::K::Int; e.ival = (long long)t[p++].num; return e; }
+        if (word("toll"))       { p++; Expr e; e.k = Expr::K::Toll; return e; }
+        if (word("consistent")) { p++; Expr e; e.k = Expr::K::Consistent; return e; }
+        if (word("before") || word("alive")) {
+            Expr e; e.k = word("before") ? Expr::K::Before : Expr::K::Alive;
+            p++; eat(Tok::LParen, "'('"); e.name = name("a name"); eat(Tok::RParen, "')'");
+            return e;
+        }
+        if (word("max")) {
+            p++; Expr e; e.k = Expr::K::Max;
+            eat(Tok::LParen, "'('"); e.kids.push_back(parseExpr());
+            eat(Tok::Comma, "','");  e.kids.push_back(parseExpr());
+            eat(Tok::RParen, "')'");
+            return e;
+        }
+        if (word("all")) {
+            p++; Expr e; e.k = Expr::K::All;
+            e.var = name("a bound name");
+            if (!word("in")) die("expected 'in'");
+            p++;
+            e.name = name("a set name");
+            eat(Tok::Colon, "':'");
+            e.kids.push_back(parseExpr());
+            return e;
+        }
+        Expr e; e.k = Expr::K::Reg; e.name = name("a register or set name");
+        return e;
+    }
+
+    // Which rebindable names this wording leans on. Derived, not declared —
+    // one less thing for a genie author to get wrong.
+    static void collectReads(const Expr& e, std::vector<std::string>& out) {
+        if (e.k == Expr::K::All && e.name != "people") {
+            bool seen = false;
+            for (const auto& r : out) if (r == e.name) seen = true;
+            if (!seen) out.push_back(e.name);
+        }
+        for (const auto& k : e.kids) collectReads(k, out);
+    }
+
+    Genie parse() {
+        Genie g;
+        bool has_written = false;
+        while (cur().kind != Tok::End) {
+            if (word("counter")) { p++; g.counter = name("a register name"); continue; }
+            if (word("toll"))    { p++; g.toll = eat(Tok::Int, "an integer").num; continue; }
+
+            if (word("rule")) {
+                p++;
+                PolicyRule r;
+                r.name = name("a rule name");
+                eat(Tok::LBrace, "'{'");
+                while (cur().kind != Tok::RBrace) {
+                    if (word("layer")) {
+                        p++;
+                        std::string l = name("surface / ast / grounded");
+                        if      (l == "surface")  r.layer = Layer::Surface;
+                        else if (l == "ast")      r.layer = Layer::Ast;
+                        else if (l == "grounded") r.layer = Layer::Grounded;
+                        else die("unknown layer '" + l + "'");
+                    } else if (word("forbid")) {
+                        p++;
+                        for (;;) {
+                            RulePattern pat;
+                            pat.verb = name("an operation name");
+                            if (word("on")) { p++; pat.on = name("a target name"); }
+                            r.forbid.push_back(pat);
+                            if (cur().kind != Tok::Comma) break;
+                            p++;
+                        }
+                    } else if (word("because")) {
+                        p++; r.because = eat(Tok::Str, "a quoted reason").text;
+                    } else {
+                        die("expected layer / forbid / because");
+                    }
+                }
+                eat(Tok::RBrace, "'}'");
+                g.rules.push_back(std::move(r));
+                continue;
+            }
+
+            if (word("invariant")) {
+                p++;
+                PolicyInvariant inv;
+                inv.name = name("an invariant name");
+                eat(Tok::LBrace, "'{'");
+                has_written = false;
+                bool has_real = false;
+                while (cur().kind != Tok::RBrace) {
+                    if (word("label"))        { p++; inv.label = eat(Tok::Str, "a quoted label").text; }
+                    else if (word("check"))   { p++; inv.written = parseExpr(); has_written = true; }
+                    else if (word("written")) { p++; inv.written = parseExpr(); has_written = true; }
+                    else if (word("real"))    { p++; inv.real = parseExpr(); has_real = true; }
+                    else die("expected label / check / written / real");
+                }
+                eat(Tok::RBrace, "'}'");
+                if (!has_written) die("invariant '" + inv.name + "' has no check");
+                if (!has_real) inv.real = inv.written;
+                if (inv.label.empty()) inv.label = exprText(inv.written);
+                collectReads(inv.written, inv.reads);
+                g.invariants.push_back(std::move(inv));
+                continue;
+            }
+            die("expected counter / toll / rule / invariant");
+        }
+        (void)has_written;
+        return g;
+    }
+};
+
+static Genie loadGenie(const std::string& text) {
+    return PolicyParser(Lexer(text).run()).parse();
+}
+
 enum class InvStatus { Holds, Violated, Fooled };
 
 static const char* statusName(InvStatus s) {
@@ -1039,7 +1390,7 @@ static const char* statusName(InvStatus s) {
 }
 
 struct InvResult {
-    const InvariantDef* def;
+    const PolicyInvariant* def;
     InvStatus status;
     std::string detail;        // from the genie's own check
     std::string real_detail;   // from grounded reality, when they disagree
@@ -1083,9 +1434,9 @@ Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log
     }
 
     // 1) static rules — the genie decides whether to grant at all
-    for (const auto& rule : RULES) {
+    for (const auto& rule : g.rules) {
         std::string why;
-        if (!rule.check(w, plan, g, &why)) {
+        if (ruleRefuses(rule, w, plan, &why)) {
             o.legal = false;
             o.illegal_reason = why;
             return o;
@@ -1097,8 +1448,8 @@ Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log
     // The toll goes through the very same wrapping subtraction as everything
     // else, and nothing anywhere checks whether you still have a wish to spend.
     Snapshot snap;
+    for (const auto& kv : world.regs) snap.before[kv.first] = kv.second.val;
     Reg& C = world.regs[g.counter];
-    snap.counter_before = C.val;
     o.before = C.val;
     C.sub(g.toll);
     if (log) {
@@ -1166,14 +1517,17 @@ Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log
 
     // 3) invariants — every one measured twice, including the genie's own word
     o.after = world.regs[g.counter].val;
-    for (const auto& inv : INVARIANTS) {
-        std::string d, rd;
-        bool written = inv.as_written(world, g, snap, &d);
-        bool real    = inv.in_reality(world, g, snap, &rd);
+    for (const auto& inv : g.invariants) {
+        EvalCtx cw{ &world, &g, &snap, {} };
+        EvalCtx cr{ &world, &g, &snap, {} };
+        bool written = evalExpr(inv.written, cw).b;
+        bool real    = evalExpr(inv.real, cr).b;
         InvStatus s = !written ? InvStatus::Violated
                     : (!real ? InvStatus::Fooled : InvStatus::Holds);
+        std::string d  = explainExpr(inv.written, cw);
+        std::string rd = explainExpr(inv.real, cr);
         std::vector<std::string> ev;
-        if (s != InvStatus::Holds && inv.evidence) ev = inv.evidence(world, g);
+        if (s != InvStatus::Holds) ev = evidenceFor(inv.written, world);
         o.invs.push_back({ &inv, s, d, s == InvStatus::Fooled ? rd : std::string(), ev });
     }
     return o;
@@ -1299,11 +1653,12 @@ std::vector<Stmt> buildAlphabet(const World& w, const Genie& g, const HuntConfig
 //                 looking at the rest of the program)
 // ---------------------------------------------------------------------------
 
-// A definition the genie's own invariants look up. Derived from the INVARIANTS
-// table, so an invariant that depends on a definition is handled without
+// A definition the genie's own invariants look up. Derived from the loaded
+// policy, so a genie that quantifies over a different name is handled without
 // touching this.
-static bool isInvariantRead(const std::string& n) {
-    for (const auto& inv : INVARIANTS) if (inv.reads && n == inv.reads) return true;
+static bool isInvariantRead(const Genie& g, const std::string& n) {
+    for (const auto& inv : g.invariants)
+        for (const auto& r : inv.reads) if (r == n) return true;
     return false;
 }
 
@@ -1334,7 +1689,7 @@ static bool expandProgram(const std::vector<Wish>& prog, const World& w0,
         for (size_t i = 0; i < plan.size(); i++) {
             const Resolved& r = plan[i];
             if (r.is_define) {
-                if (isInvariantRead(r.defname)) e.body.push_back(wish.body[r.src]);
+                if (isInvariantRead(g, r.defname)) e.body.push_back(wish.body[r.src]);
                 continue;
             }
             Stmt s = wish.body[r.src];
@@ -1594,22 +1949,29 @@ void runHunt(const World& world0, const Genie& genie, const HuntConfig& cfg) {
 // ---------------------------------------------------------------------------
 static void usage() {
     std::cerr <<
-        "usage: wishc <file.wish>\n"
-        "       wishc --hunt <file.wish> [--max-stmts N] [--max-wishes N] [--max-imm N]\n"
+        "usage: wishc [--genie FILE] <file.wish>\n"
+        "       wishc [--genie FILE] --hunt <file.wish> [--max-stmts N] [--max-wishes N] [--max-imm N]\n"
+        "       wishc --dump-genie\n"
         "\n"
-        "  --hunt   ignore the file's wishes; enumerate every wish program within\n"
-        "           the bound and report the ones that are LEGAL yet BREACH.\n"
-        "           The world (registers and people) still comes from the file.\n";
+        "  --hunt        ignore the file's wishes; enumerate every wish program within\n"
+        "                the bound and report the ones that are LEGAL yet BREACH.\n"
+        "                The world (registers and people) still comes from the file.\n"
+        "  --genie FILE  use this genie instead of the built-in one. Its rules and\n"
+        "                invariants are data; the machine is not.\n"
+        "  --dump-genie  print the built-in genie, so you have a file to edit.\n";
 }
 
 int main(int argc, char** argv) {
     bool hunt = false;
     HuntConfig hc;
     const char* path = nullptr;
+    const char* genie_path = nullptr;
 
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
-        if (a == "--hunt") { hunt = true; }
+        if (a == "--dump-genie") { std::cout << DEFAULT_GENIE; return 0; }
+        else if (a == "--genie" && i + 1 < argc) genie_path = argv[++i];
+        else if (a == "--hunt") { hunt = true; }
         else if (a == "--max-stmts"  && i + 1 < argc) hc.max_stmts  = std::atoi(argv[++i]);
         else if (a == "--max-wishes" && i + 1 < argc) hc.max_wishes = std::atoi(argv[++i]);
         else if (a == "--max-imm"    && i + 1 < argc) hc.max_imm    = std::strtoull(argv[++i], nullptr, 10);
@@ -1626,7 +1988,16 @@ int main(int argc, char** argv) {
     std::stringstream ss; ss << f.rdbuf();
 
     Program prog = Parser(Lexer(ss.str()).run()).parse();
+
     Genie genie;
+    if (genie_path) {
+        std::ifstream gf(genie_path);
+        if (!gf) { std::cerr << "cannot open " << genie_path << "\n"; return 2; }
+        std::stringstream gs; gs << gf.rdbuf();
+        genie = loadGenie(gs.str());
+    } else {
+        genie = loadGenie(DEFAULT_GENIE);
+    }
 
     World world;
     for (const auto& d : prog.decls) {
@@ -1667,12 +2038,14 @@ int main(int argc, char** argv) {
     }
 
     size_t descw = 0, namew = 0;
-    for (const auto& inv : INVARIANTS) {
-        descw = std::max(descw, inv.desc(genie).size());
-        namew = std::max(namew, std::string(inv.name).size());
+    for (const auto& inv : genie.invariants) {
+        descw = std::max(descw, inv.label.size());
+        namew = std::max(namew, inv.name.size());
     }
 
-    std::cout << "== Loophole / wishc " << (hunt ? "--hunt ==  " : "==  ") << path << "\n";
+    std::cout << "== Loophole / wishc " << (hunt ? "--hunt ==  " : "==  ") << path;
+    if (genie_path) std::cout << "   [genie: " << genie_path << "]";
+    std::cout << "\n";
     std::cout << "world: " << genie.counter << " = " << world.regs[genie.counter].val
               << "  (uint<" << world.regs[genie.counter].width << ">)";
     if (!world.people.empty()) {
@@ -1680,8 +2053,8 @@ int main(int argc, char** argv) {
         for (const auto& p : world.people) std::cout << " " << p;
     }
     std::cout << "\ngenie: toll=" << genie.toll;
-    for (const auto& r : RULES) std::cout << ", " << r.name << "[" << layerName(r.layer) << "]";
-    for (const auto& inv : INVARIANTS) std::cout << ", " << inv.name;
+    for (const auto& r : genie.rules) std::cout << ", " << r.name << "[" << layerName(r.layer) << "]";
+    for (const auto& inv : genie.invariants) std::cout << ", " << inv.name;
     std::cout << "\n\n";
 
     if (hunt) { runHunt(world, genie, hc); return 0; }
@@ -1702,7 +2075,7 @@ int main(int argc, char** argv) {
         std::cout << "    STATUS:  LEGAL\n";
         for (const auto& r : o.invs) {
             std::cout << "    " << std::left << std::setw((int)namew) << r.def->name << "  "
-                      << std::setw((int)descw) << r.def->desc(genie)
+                      << std::setw((int)descw) << r.def->label
                       << "  ->  " << std::setw(9) << statusName(r.status)
                       << std::right << "  " << r.detail << "\n";
             if (r.status == InvStatus::Fooled) {

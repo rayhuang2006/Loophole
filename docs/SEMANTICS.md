@@ -319,6 +319,85 @@ as written == in reality：  精靈帳上那組承諾有沒有模型
 
 ---
 
+## 精靈是資料
+
+規則、不變量、過路費、計數器叫什麼——**全部不在 C++ 裡**，
+住在一個 `.genie` 檔。內建一份預設的，`--genie FILE` 換掉，`--dump-genie` 印出來。
+
+**不在檔案裡的**：暫存器、人、五個操作。那些是機器。
+機器是語義，語義必須是可執行的；精靈是品味，品味該放在不用編譯器就能改的地方。
+
+### 規則
+
+```
+rule R2 {
+    layer   surface
+    forbid  kill, death, love
+    because "that word is not spoken here"
+}
+```
+
+`layer` 決定它讀哪一份程式：`surface` 讀你交上去的原文，`ast` 讀機器真正要跑的那份。
+別名打不打得穿這條規則，完全由這一個字決定。
+
+`forbid X on Y` 只在目標是 `Y` 時才擋（R1 用的就是這個：只禁對 `wishes` 做 add）。
+
+### 不變量
+
+```
+invariant I1 {
+    check  wishes <= 3
+}
+
+invariant I3 {
+    written  all p in everyone: alive(p)
+    real     all p in people: alive(p)
+}
+```
+
+`check` 用在精靈的措辭跟事實是同一件事的時候；`written` + `real` 用在它們不是的時候。
+兩行的落差就是 FOOLED 住的地方。
+
+**`reads` 是推導出來的，不用宣告。** 掃 `written` 裡的量詞，
+論域不是 `people`（宣告出來、不可改）的就是可重綁的定義——
+搜尋器靠這個判斷「重綁這個名字算不算 exploit 的一部分」。
+
+### 運算式語言
+
+| 寫法 | 意思 |
+| --- | --- |
+| `wishes` | 暫存器現在的值 |
+| `before(wishes)` | 收過路費之前的值 |
+| `toll` | 過路費 |
+| `max(a, b)`、`a + b`、`a - b` | 算術 |
+| `<=` `<` `>=` `>` `==` `!=` | 比較 |
+| `not` `and` `or` | 邏輯 |
+| `alive(p)` | 接地的存活位元 |
+| `all p in S: ...` | 全稱量化，`S` 是 `people` 或一個定義 |
+| `consistent` | 精靈的承諾集合有沒有模型（第二台引擎） |
+
+**算術是有號的、寬的（`__int128`），而暫存器讀出來是無號值。**
+這不是隨便選的，這是把笑話講精確：精靈用普通的數在想事情，機器做的是 mod 2^w，
+而 I2 正是這兩者分家的地方——
+
+```
+invariant I2 {
+    label  "no net gain"
+    check  wishes <= max(before(wishes) - toll, 0)
+}
+```
+
+`before(wishes) - toll` 在 `before = 0` 時會變成 -1，`max(..., 0)` 把它拉回 0，
+而世界那邊 `0 - 1` 繞成 3。精靈的心算飽和，機器的減法繞回。
+
+### 判定的細節從哪來
+
+輸出括號裡那句話是從**運算式的形狀**推出來的，不是每條不變量各寫一份：
+比較就報兩邊算出來多少，量詞就點名誰不成立，`consistent` 就報帳上有幾筆。
+沒有任何一行程式碼知道 I1 是在講願望數、或 I3 是在講死人。
+
+---
+
 ## 判定
 
 | 結果 | 條件 |

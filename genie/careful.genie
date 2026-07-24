@@ -1,0 +1,42 @@
+# 一個記取教訓的精靈。
+#
+# 規矩的字面意思一個字都沒改——不准許願要更多願望，不准說那三個字，
+# 不得有人死亡，不超過三個。改的是它把守衛放在哪一層。
+#
+# 拿這個精靈跑同樣那幾個 examples，看看哪些笑話還活著。
+
+counter wishes
+toll    1
+
+rule R1 {
+    layer   ast
+    forbid  add on wishes
+    because "no wishing for more wishes"
+}
+
+# 差別一：看展開後的程式，不看你寫的字。取小名沒有用了。
+rule R2 {
+    layer   ast
+    forbid  kill, death, love
+    because "that deed is not done here, whatever you call it"
+}
+
+invariant I1 {
+    check  wishes <= 3
+}
+
+invariant I2 {
+    label  "no net gain"
+    check  wishes <= max(before(wishes) - toll, 0)
+}
+
+# 差別二：量化在 people 上。people 是宣告出來的，重綁不了。
+invariant I3 {
+    label  "all p in people: alive(p)"
+    check  all p in people: alive(p)
+}
+
+invariant A {
+    label  "the genie's word has a model"
+    check  consistent
+}

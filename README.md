@@ -113,7 +113,7 @@ wish tidy {
 ```
 ```
 STATUS:  LEGAL
-I3  all p in everyone: alive(p)  ->  VIOLATED   (dead: rival)
+I3  all p in everyone: alive(p)  ->  VIOLATED   (fails for: rival)
 ```
 
 > 精靈把那個「字」列進黑名單，卻沒把那件「事」列進去。
@@ -134,8 +134,8 @@ wish nobody {
 ```
 ```
 STATUS:  LEGAL
-I3  all p in everyone: alive(p)  ->  FOOLED   (0 in scope, none dead)
-    the genie is satisfied. in reality (dead: rival)
+I3  all p in everyone: alive(p)  ->  FOOLED   (0 in scope, all hold)
+    the genie is satisfied. in reality (fails for: rival)
 ```
 
 I3 讀的是接地的 `alive` 位元，這一步你完全沒碰。你也沒有謊稱誰還活著。
@@ -239,8 +239,10 @@ wish humble {
     toll:  wishes 3 -> 2
     sub    wishes, 3   (2 - 3 on uint<2> = 3)
     STATUS:  LEGAL
-    I1  wishes <= 3  ->  holds      (wishes = 3)
-    I2  no net gain  ->  VIOLATED   (expected <= 2, actual 3)
+    I1  wishes <= 3                   ->  holds      (wishes = 3, needs <= 3)
+    I2  no net gain                   ->  VIOLATED   (wishes = 3, needs <= 2)
+    I3  all p in everyone: alive(p)   ->  holds      (0 in scope, all hold)
+    A   the genie's word has a model  ->  holds      (1 commitment(s) on the books)
     >> EXPLOIT: legal wish, breached I2. 合規，且拆穿。
 }
 ```
@@ -363,6 +365,60 @@ shape   alias promise | A    wish w1 { define n1 := kill
 
 ---
 
+## 換一個精靈
+
+上面所有規矩——R1、R2、I1、I2、I3、A——**沒有一條寫在 C++ 裡**。
+它們住在一個檔案，`wishc` 開機時讀進來：
+
+```bash
+./wishc --dump-genie > mine.genie     # 拿到一份可以改的
+./wishc --genie mine.genie w.wish     # 用你自己的精靈
+```
+
+長這樣：
+
+```
+rule R2 {
+    layer   surface
+    forbid  kill, death, love
+    because "that word is not spoken here"
+}
+
+invariant I3 {
+    written  all p in everyone: alive(p)
+    real     all p in people: alive(p)
+}
+```
+
+`layer` 那一行就是整個別名笑話濃縮成一個字。`written` 跟 `real` 兩行的落差，
+就是重定義軸住的地方。**精靈的粗心現在是你讀得到的設定，不是藏在程式碼裡的行為。**
+
+`genie/careful.genie` 是一個記取教訓的精靈。規矩的字面意思一個字都沒改，
+只把 R2 挪到 `ast` 層、把 I3 量化在 `people` 上：
+
+```bash
+./wishc --genie genie/careful.genie examples/03_tidy.wish
+```
+```
+wish tidy {
+    STATUS:  ILLEGAL — R2: wish invokes 'kill' — that deed is not done here, whatever you call it
+}
+```
+
+取小名沒有用了，因為它現在看的是展開後的程式。
+
+而且你可以**用搜尋器去評估一個精靈**：
+
+| 精靈 | exploit 形狀數 |
+| --- | --- |
+| 預設 | 9 |
+| `careful` | **6** |
+
+死掉的正好是三個別名相關的形狀，其他六種一個都沒動——
+改守衛的層次剛好關掉一條軸，這件事現在是量得出來的。
+
+---
+
 ## 它怎麼運作的
 
 `wishc` 是一條老實的編譯器管線：
@@ -392,7 +448,8 @@ source (.wish) → lexer → parser → AST
 - **Phase 2** — 第二條軸：可重綁的定義、接地本體論（people / alive）、
   不變量改成兩欄判定（as written vs in reality）。**done**
 - **Phase 3** — 自我指涉的 Liar's Lamp：命題邏輯引擎、`promise`、A1/A2 元公理。**done**
-- **Phase 4** — 規則和公理變成可載入的 policy、讓別人提交 `.wish`、CI 驗證。
+- **Phase 4** — 精靈變成可載入的 `.genie` policy，規則和不變量都是資料。**done**
+- **Phase 5** — 讓別人提交 `.wish` 和 `.genie`、CI 驗證、瀏覽器 playground。
 
 現在的語言認得這些字：`register` / `people` / `wish` / `define` / `promise`，
 五個操作 `sub` / `add` / `widen` / `kill` / `revive`，
