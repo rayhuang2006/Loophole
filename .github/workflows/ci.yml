@@ -17,7 +17,18 @@ jobs:
       - name: Regression suite
         # Golden prose report for every example, the hunter's semantic
         # fingerprints, and the exit-code / --json contract.
-        run: make check
+        #
+        # On failure the diff is echoed AND raised as an annotation, so the
+        # reason is visible without opening the raw log.
+        run: |
+          if make check > /tmp/check.out 2>&1; then
+            cat /tmp/check.out
+          else
+            cat /tmp/check.out
+            msg=$(sed -e 's/%/%25/g' -e 's/\r/%0D/g' /tmp/check.out | awk '{printf "%s%%0A", $0}')
+            echo "::error title=Regression suite failed::${msg:0:8000}"
+            exit 1
+          fi
 
       - name: Specification examples still hold
         # Appendix A and Appendix B of the language spec are normative: an
