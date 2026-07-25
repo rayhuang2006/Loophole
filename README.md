@@ -244,6 +244,7 @@ wish tidy
 - **v1.0** 兩層世界模型：人的屬性 + 精靈用 `concept` 定義的死亡。**done**（規格見 [語言規格 1.0](docs/spec/loophole-1.0.md)）
 - **v1.0.0 發布** LICENSE、版本號、機器可讀輸出、離開碼契約、CI。**done**
 - **v1.1.0** 更名為 `loophole`、兩種語言各自編版本、`make install`、砍掉不存在的 `grounded` 層。**done**
+- **v1.2.0** 報告重寫：照精靈實際的動作順序排，規則和不變量不再長得一樣。**done**
 - **接下來** VSCode 語法高亮（`.wish` 和 `.genie` 各一份文法）、瀏覽器 playground、解題站。
 
 現在的語言認得 `register` / `attribute` / `people` / `wish` / `define` / `promise`，
