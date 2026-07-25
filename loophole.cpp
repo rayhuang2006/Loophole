@@ -66,7 +66,7 @@
 // whichever language grew it. Dependants (an editor plugin, a judge) pin
 // against these.
 // ---------------------------------------------------------------------------
-static const char* COMPILER_VERSION = "1.3.0";
+static const char* COMPILER_VERSION = "1.3.1";
 static const char* WISH_VERSION     = "1.0";
 static const char* GENIE_VERSION    = "1.0";
 
@@ -134,7 +134,10 @@ static std::string sourceLine(int line) {
 // since every construct in both languages is ASCII (§3) and a non-ASCII byte is
 // itself the error being reported.
 [[noreturn]] static void fail(const std::string& msg, int line, int col,
-                              const std::string& help) {
+                              const std::string& help,
+                              const std::string& note =
+                                  "no wish was judged. the genie cannot grant "
+                                  "what it cannot read.") {
     std::string src = sourceLine(line);
     std::string num = std::to_string(line);
     std::string pad(num.size(), ' ');
@@ -157,7 +160,7 @@ static std::string sourceLine(int line) {
     // The one line of the machine's output that is allowed to be in-world. It
     // is also literally true, and it says the thing a reader most needs to
     // know: nothing was judged, so no verdict below means anything.
-    std::cerr << "\nno wish was judged. the genie cannot grant what it cannot read.\n";
+    if (!note.empty()) std::cerr << "\n" << note << "\n";
     // Exit 2, never 1. Per §10.1 exit 1 means "judged, and something was an
     // exploit" — reporting a syntax error as 1 would tell a script that a file
     // which does not even parse had found a hole in the genie.
@@ -581,6 +584,7 @@ enum class Shape { Bare, WithImm, WithWidth };
 struct Stmt {
     StmtKind kind = StmtKind::Op;
     int line = 1;
+    int col  = 1;      // of the verb, so a diagnostic can point at it
 
     // StmtKind::Op
     std::string verb;      // as written — may be an alias
@@ -920,7 +924,7 @@ struct Parser {
     }
 
     Stmt parseStmt() {
-        Stmt st; st.line = cur().line;
+        Stmt st; st.line = cur().line; st.col = cur().col;
 
         if (cur().kind == Tok::KwPromise) {
             st.kind = StmtKind::Promise;
@@ -1168,8 +1172,25 @@ static bool followName(const std::map<std::string, Binding>& defs,
 // Turn a wish body into resolved statements, threading the definition
 // environment through in order. Returns false with a reason if the genie cannot
 // make sense of the request at all.
+// Two ways resolution can fail, and they are not the same kind of thing.
+//
+//   R0Cycle    the genie refuses the wish (§7.2 names R0 as a rule). The wish
+//              is ILLEGAL, the world is unchanged, and the run continues.
+//   Malformed  the machine cannot read the program at all: a verb that denotes
+//              no operation, or operands of the wrong shape. §6.1 calls this a
+//              compile error, and the genie has no opinion about it -- reporting
+//              it as a refusal credits the genie with a decision it never made.
+//
+// The distinction cannot live inside this function, because the hunter needs
+// both to be non-fatal: its alphabet writes an alias as a verb independently of
+// the `define` that binds it, so it generates use-before-define candidates on
+// purpose and must simply skip them.
+enum class ResolveFail { None, R0Cycle, Malformed };
+
 static bool resolvePlan(const Wish& w, const World& w0,
-                        std::vector<Resolved>& out, std::string* reason) {
+                        std::vector<Resolved>& out, std::string* reason,
+                        ResolveFail* how = nullptr, int* fline = nullptr,
+                        int* fcol = nullptr) {
     std::map<std::string, Binding> defs = w0.defs;
     out.clear();
 
@@ -1199,6 +1220,7 @@ static bool resolvePlan(const Wish& w, const World& w0,
                     *reason = "R0: " + err + " (line " + std::to_string(st.line)
                               + ") — a definition may not be circular";
                 }
+                if (how) *how = ResolveFail::R0Cycle;
                 return false;
             }
             Resolved r; r.is_define = true; r.line = st.line; r.src = si;
@@ -1213,6 +1235,7 @@ static bool resolvePlan(const Wish& w, const World& w0,
                 *reason = "R0: " + err + " (line " + std::to_string(st.line)
                           + ") — a definition may not be circular";
             }
+            if (how) *how = ResolveFail::R0Cycle;
             return false;
         }
         int op = opByKeyword(verb);
@@ -1226,18 +1249,22 @@ static bool resolvePlan(const Wish& w, const World& w0,
                 for (const auto& o : OPS) cands.push_back(o.keyword);
                 for (const auto& kv : defs) cands.push_back(kv.first);
                 std::string near = didYouMean(verb, cands);
-                *reason = "unknown operation '" + st.verb + "' (line "
-                          + std::to_string(st.line) + ")"
+                *reason = "unknown operation '" + st.verb + "'"
                           + (near.empty() ? "" : " — did you mean '" + near + "'?");
             }
+            if (how)   *how   = ResolveFail::Malformed;
+            if (fline) *fline = st.line;
+            if (fcol)  *fcol  = st.col;
             return false;
         }
         if (shapeFor(OPS[op].operands) != st.shape ||
             wantsAttr(OPS[op].operands) != !st.attr.empty()) {
             if (reason) {
-                *reason = std::string("wrong operands for '") + OPS[op].keyword
-                          + "' (line " + std::to_string(st.line) + ")";
+                *reason = std::string("wrong operands for '") + OPS[op].keyword + "'";
             }
+            if (how)   *how   = ResolveFail::Malformed;
+            if (fline) *fline = st.line;
+            if (fcol)  *fcol  = st.col;
             return false;
         }
 
@@ -1247,6 +1274,7 @@ static bool resolvePlan(const Wish& w, const World& w0,
                 *reason = "R0: " + err + " (line " + std::to_string(st.line)
                           + ") — a definition may not be circular";
             }
+            if (how) *how = ResolveFail::R0Cycle;
             return false;
         }
 
@@ -1747,6 +1775,11 @@ struct InvResult {
 
 struct Outcome {
     bool legal = true;
+    // Not a refusal: the machine could not read the program (§6.1). The genie
+    // has no opinion about a verb that denotes nothing, so this must not be
+    // reported as something the genie decided.
+    bool malformed = false;
+    int  fail_line = 0, fail_col = 0;    // where, when malformed
     std::string illegal_reason;
     bool ran = false;
     std::string error;
@@ -1779,9 +1812,11 @@ Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log
     // resolved program, and so does the executor.
     std::vector<Resolved> plan;
     std::string reason;
-    if (!resolvePlan(w, world, plan, &reason)) {
+    ResolveFail how = ResolveFail::None;
+    if (!resolvePlan(w, world, plan, &reason, &how, &o.fail_line, &o.fail_col)) {
         o.legal = false;
         o.illegal_reason = reason;
+        o.malformed = (how == ResolveFail::Malformed);
         return o;
     }
 
@@ -2601,14 +2636,38 @@ int main(int argc, char** argv) {
     const char* IND = "              ";      // continuation, under the stage column
     int exploits = 0;
     size_t refused = 0;
+    size_t judged = 0;
     for (const auto& w : prog.wishes) {
-        std::cout << "wish " << w.name << "\n";
-
         // Capture rather than stream: the trace belongs under `ran`, which is
         // printed after the legality line that grantWish decides on the way.
+        // Nothing about this wish is printed until it is known to be readable,
+        // so a malformed one does not leave a dangling header above the error.
         std::ostringstream trace;
         Outcome o = grantWish(w, genie, world, &trace);
 
+        // A program the machine cannot read is not a wish the genie turned
+        // down. Reporting it under `rules` would put words in the genie's
+        // mouth, and — worse — it would let the run finish and exit 0, telling
+        // a script that a file which never executed had been judged clean.
+        if (o.malformed) {
+            // Resolution cannot be done up front: a verb may be bound by a
+            // `define` in an earlier wish, so whether a name denotes anything
+            // depends on what has already run. Earlier wishes therefore really
+            // were judged, and the closing note has to say so.
+            std::cout.flush();
+            fail("in wish '" + w.name + "': " + o.illegal_reason,
+                 o.fail_line, o.fail_col,
+                 "a verb must name one of the six operations, or a definition "
+                 "that reaches one. This is a compile error (spec §6.1), not "
+                 "something the genie refused.",
+                 judged ? "the wishes before this one were judged; this one and "
+                          "everything after it were not."
+                        : "no wish was judged. the genie cannot grant what it "
+                          "cannot read.");
+        }
+        judged++;
+
+        std::cout << "wish " << w.name << "\n";
         std::cout << "    " << std::left << std::setw(10) << "rules";
         if (!o.legal) {
             refused++;

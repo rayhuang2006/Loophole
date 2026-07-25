@@ -200,7 +200,15 @@ The operations of version 1.0 are fixed:
   operation precisely so that a genie may forbid it by name and a player may
   defeat that by aliasing it.
 - Applying an operation to an `arg` of the wrong shape, or to a name that does
-  not denote a register / person / attribute, is a compile error.
+  not denote a register / person / attribute, is a compile error. So is a verb
+  that resolves to no operation at all. These are errors of the machine, not
+  refusals by the genie: a genie's rules are about operations, and it has no
+  opinion about a name that denotes none. An implementation MUST NOT report them
+  as `ILLEGAL` — that verdict says the genie declined, and it did not.
+- Whether a verb denotes an operation can depend on definitions made by earlier
+  wishes (§6.2), so this error is not necessarily detectable before execution
+  begins. An implementation MUST stop at the offending wish; wishes already
+  granted keep their verdicts.
 
 ### 6.2 Definitions
 

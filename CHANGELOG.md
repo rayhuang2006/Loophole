@@ -6,6 +6,36 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.3.1 — wish 1.0, genie 1.0
+
+**A verb that denotes no operation was reported as the genie refusing, and the
+run exited 0.** `sube candy, 2` produced `REFUSED. unknown operation 'sube'` and
+then `1 refused, 0 granted, 0 exploits` — a clean judgment, exit 0, from a file
+that never executed. This is the same defect as the exit-1 one fixed in 1.3.0,
+in a worse place: 0 is the code that means "judged, and the genie held".
+
+It also put words in the genie's mouth. A genie's rules are about operations;
+it has no opinion whatever about a name that denotes none. §6.1 calls this a
+compile error, and it now is one, with a caret and a suggestion.
+
+The distinction had to be made inside resolution without making it fatal there,
+because the hunter depends on both failures being recoverable: its alphabet
+writes an alias as a verb independently of the `define` that binds it, so it
+generates use-before-define candidates deliberately and must skip them. The
+resolver now reports *which* kind of failure occurred and the caller decides.
+
+- **An R0 cycle is still a refusal.** §7.2 names R0 as a rule, so a circular
+  definition leaves the wish `ILLEGAL`, the world unchanged, and the run
+  continuing. Only the malformed cases became errors. CI asserts both.
+- **The closing note tells the truth about what ran.** Resolution cannot be done
+  up front — a verb may be bound by a `define` in an earlier wish — so the error
+  can surface mid-run, and earlier wishes really were judged. The note says
+  which case it is instead of always claiming nothing was judged.
+- Nothing is printed for a wish until it is known to be readable, so a malformed
+  one no longer leaves a dangling header above its own error.
+- §6.1 of the specification now states this explicitly, including that the error
+  is not necessarily detectable before execution begins.
+
 ## loophole 1.3.0 — wish 1.0, genie 1.0
 
 **A syntax error exited 1, which is the code for "an exploit was found."**

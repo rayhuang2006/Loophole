@@ -68,14 +68,25 @@ if [ "$UPDATE" = "0" ]; then
   # in the genie -- and this suite only ever checked the missing-file path, so
   # nothing caught it. One case per way of failing, not one per exit code.
   tmp=$(mktemp -d)
-  printf 'register w : uint<2> = 3\nwish x { sub w, 1; }\n' > "$tmp/lex.wish"
-  printf 'register w : uint<99> = 3\nwish x { sub w, 1 }\n'  > "$tmp/width.wish"
-  printf 'register w : uint<2> = 3\nwish x { sub w\n'         > "$tmp/parse.wish"
+  printf 'register wishes : uint<2> = 3\nwish x { sub wishes, 1; }\n' > "$tmp/lex.wish"
+  printf 'register wishes : uint<99> = 3\nwish x { sub wishes, 1 }\n'  > "$tmp/width.wish"
+  printf 'register wishes : uint<2> = 3\nwish x { sub wishes\n'      > "$tmp/parse.wish"
   for bad in lex width parse; do
     ./loophole "$tmp/$bad.wish" >/dev/null 2>&1
     [ $? -eq 2 ] || { echo "FAIL exit code: $bad error should be 2"; rc=1; }
   done
-  printf 'counter w\ntoll 1\nrule R { layer nope forbid add }\n' > "$tmp/bad.genie"
+  # A verb that denotes no operation is a compile error (§6.1), not a refusal.
+  # It used to be reported as the genie refusing, and the run would finish and
+  # exit 0 -- telling a script that a file which never executed was judged clean.
+  printf 'register wishes : uint<2> = 3\nwish x { sube wishes, 1 }\n' > "$tmp/verb.wish"
+  ./loophole "$tmp/verb.wish" >/dev/null 2>&1
+  [ $? -eq 2 ] || { echo "FAIL exit code: an unknown verb should be 2"; rc=1; }
+  # ...but R0, a definition cycle, IS a refusal: §7.2 names it as a rule. The
+  # wish is ILLEGAL, the world is unchanged, and the run continues.
+  printf 'register wishes : uint<2> = 3\nwish x { define a := b\ndefine b := a\na wishes, 1 }\n' > "$tmp/cyc.wish"
+  ./loophole "$tmp/cyc.wish" >/dev/null 2>&1
+  [ $? -eq 0 ] || { echo "FAIL exit code: an R0 cycle is a refusal, not an error"; rc=1; }
+  printf 'counter wishes\ntoll 1\nrule R { layer nope forbid add }\n' > "$tmp/bad.genie"
   ./loophole --genie "$tmp/bad.genie" examples/01_humble.wish >/dev/null 2>&1
   [ $? -eq 2 ] || { echo "FAIL exit code: a bad genie should be 2"; rc=1; }
   # Escape codes must never reach a pipe: the goldens and every grep downstream
