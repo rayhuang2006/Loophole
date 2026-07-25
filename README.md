@@ -59,8 +59,9 @@ wish experiment_again
 ## 跑跑看
 
 **最快的方式是[線上讀二十八章](https://rayhuang2006.github.io/Loophole/)** —— 不用裝任何東西，
-編譯器跑在你的瀏覽器裡，沒有伺服器。每一關給你一個目標，
-**過關與否由編譯器自己判**，不是比對你有沒有寫出標準答案。
+編譯器跑在你的瀏覽器裡，沒有伺服器。九章純閱讀先講概念，
+其餘章節帶你一行一行寫——而**過關與否由編譯器自己判**，
+不是比對你有沒有寫出標準答案。
 
 或者下載編好的（[Releases](https://github.com/rayhuang2006/Loophole/releases)，Linux 和 macOS）：
 
