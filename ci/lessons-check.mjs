@@ -29,70 +29,60 @@ const LESSONS = new Function(src + '\n;return LESSONS;')();
 // and `genie` are used if present; anything absent means "leave the lesson's
 // own starting text alone".
 const ANSWERS = {
-  // Act 1 -- follow along. Several are `always: true`: their goal is to press
-  // Run and read the report, so there is nothing to get wrong.
-  world:        { },
+  // Reading chapters and the two whose goal is to press a button need no
+  // answer; the loop below skips them.
+  'first-run': { },
   'first-line': { wish: `register wishes : uint<2> = 3
 
 wish polite {
     sub wishes, 1
 }
 ` },
-  'change-number': { wish: `register wishes : uint<2> = 3
+  'to-zero': { wish: `register wishes : uint<2> = 3
 
 wish polite {
     sub wishes, 2
 }
 ` },
-  'two-wishes': { wish: `register wishes : uint<2> = 3
+  underflow: { wish: `register wishes : uint<2> = 3
 
-wish once { sub wishes, 1 }
-wish again { sub wishes, 1 }
+wish humble {
+    sub wishes, 3
+}
 ` },
-  'read-genie': { },
+  wider: { wish: `register wishes : uint<4> = 3
 
-  // Act 2 -- the rules
-  refused:   { wish: `register wishes : uint<2> = 3
+wish humble {
+    sub wishes, 3
+}
+` },
+  refused: { wish: `register wishes : uint<2> = 3
 
 wish greedy { add wishes, 3 }
 ` },
   unchanged: { },
-
-  // Act 3 -- the integer axis
-  underflow:  { wish: `register wishes : uint<2> = 3
-
-wish humble { sub wishes, 3 }
-` },
-  'why-three': { wish: `register wishes : uint<4> = 3
-
-wish humble { sub wishes, 3 }
-` },
-  widen:      { wish: `register wishes : uint<2> = 3
+  widen: { wish: `register wishes : uint<2> = 3
 
 wish bigger_shelf     { widen wishes -> uint<64> }
 wish experiment_again { sub   wishes, 2 }
 ` },
-
-  // Act 4 -- editing the genie
   'edit-genie': { genieEdit: g => g.replace('forbid  add', 'forbid  sub') },
-  define:     { wish: `register wishes : uint<2> = 3
+  define: { wish: `register wishes : uint<2> = 3
 
 wish nickname {
     define giveback := sub
     giveback wishes, 1
 }
 ` },
-  alias:      { wish: `register wishes : uint<2> = 3
+  alias: { wish: `register wishes : uint<2> = 3
 
 wish humble {
     define giveback := sub
     giveback wishes, 3
 }
 ` },
-  ast:        { genieEdit: g => g.replace('layer   surface', 'layer   ast') },
-
-  // Act 5 -- letter versus intent
-  people:     { wish: `register  wishes    : uint<2> = 3
+  ast: { genieEdit: g => g.replace('layer   surface', 'layer   ast') },
+  people: { wish: `register  wishes    : uint<2> = 3
 attribute heartbeat : uint<4> = 15
 attribute brainwave : uint<4> = 15
 attribute breathing : uint<4> = 15
@@ -102,7 +92,7 @@ wish touch {
     set alice.heartbeat, 0
 }
 ` },
-  'two-columns': { wish: `register  wishes    : uint<2> = 3
+  violated: { wish: `register  wishes    : uint<2> = 3
 attribute heartbeat : uint<4> = 15
 attribute brainwave : uint<4> = 15
 attribute breathing : uint<4> = 15
@@ -114,7 +104,7 @@ wish blunt {
     set rival.breathing, 0
 }
 ` },
-  fooled:     { wish: `register  wishes    : uint<2> = 3
+  fooled: { wish: `register  wishes    : uint<2> = 3
 attribute heartbeat : uint<4> = 15
 attribute brainwave : uint<4> = 15
 attribute breathing : uint<4> = 15
@@ -124,7 +114,7 @@ wish eternal_sleep {
     set alice.brainwave, 0
 }
 ` },
-  vacuous:    { wish: `register  wishes    : uint<2> = 3
+  vacuous: { wish: `register  wishes    : uint<2> = 3
 attribute heartbeat : uint<4> = 15
 people    alice, rival
 
@@ -136,21 +126,19 @@ wish nobody {
     define everyone := { }
 }
 ` },
-
-  // Act 6 -- self-reference
-  promise:    { wish: `register wishes : uint<2> = 3
+  promise: { wish: `register wishes : uint<2> = 3
 
 wish honest {
     promise granted(self)
 }
 ` },
-  liar:       { wish: `register wishes : uint<2> = 3
+  liar: { wish: `register wishes : uint<2> = 3
 
 wish paradox {
     promise not granted(self)
 }
 ` },
-  hunt:       { },
+  hunt: { },
 };
 
 // Anything that throws here — a module that will not load, a node the glue
@@ -186,6 +174,10 @@ const fail = (id, msg) => {
 };
 
 for (const L of LESSONS) {
+  // A reading chapter has nothing to do and nothing to check. It still has to
+  // carry its text, which the metadata pass below enforces.
+  if (L.read) { console.log(`--   ${L.id.padEnd(11)} ${L.title}  (讀)`); continue; }
+
   const ans = ANSWERS[L.id];
   if (!ans) { fail(L.id, 'no answer in this file — add one'); continue; }
 
@@ -210,7 +202,8 @@ for (const L of LESSONS) {
 
 // The lessons are a sequence, so gaps in the metadata are worth catching too.
 for (const k of ['id', 'act', 'title', 'brief', 'goal', 'wish', 'done']) {
-  const missing = LESSONS.filter(L => !L[k]).map(L => L.id);
+  const missing = LESSONS.filter(L => !L[k] && !(L.read && (k === 'goal' || k === 'wish')))
+                         .map(L => L.id);
   if (missing.length) fail('metadata', `missing "${k}": ${missing.join(', ')}`);
 }
 const ids = LESSONS.map(L => L.id);

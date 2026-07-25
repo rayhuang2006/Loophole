@@ -6,6 +6,45 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.8.0 — wish 1.0, genie 1.0
+
+**A course, rather than a worksheet.** The previous set was twenty-one
+exercises: every chapter demanded an action, and the first one opened with
+`register wishes : uint<2> = 3` without having said what this language is for or
+what a bit is. That is written for somebody who already knows.
+
+Twenty-eight chapters now, and **nine of them ask for nothing at all**. They
+exist so the next chapter can assume something:
+
+- The joke itself, told properly, before any syntax.
+- What a register is — as a two-digit odometer that rolls over at 99, before
+  `uint<2>` is ever mentioned.
+- That it rolls over *backwards* too, worked through by hand, one chapter before
+  the reader is asked to underflow anything.
+- Rules versus invariants — a gate versus a ruler — before either is used.
+- Aliasing, as a doorman who was told to keep out a name rather than a person.
+- The letter and the intent, as a school rule about phones and a student with a
+  tablet, before `written`/`real` appears.
+- What the whole thing meant, at the end.
+
+Every doing-chapter still teaches its syntax first, annotated piece by piece.
+The arc where the reader walls off their own exploit, aliases past their own
+wall, and then repairs it is unchanged; it just has a chapter of explanation in
+front of it now.
+
+**The page was redesigned around what this project actually is**: a joke taken
+with the seriousness of a standards document. Serif for the prose and monospace
+for the machinery, and the contrast between the two is the thesis. Hairline
+rules instead of cards and shadows, the way a book divides a page. One red,
+used for exactly one thing — where the genie was beaten — after the way a scribe
+marked what mattered in vermilion and everything else in iron gall.
+
+`ci/lessons-check.mjs` covers the reading chapters too: they are skipped for
+solvability but still have to carry their text.
+
+**Progress is stored under a new key.** Chapter ids survive a rewrite, and
+reusing the old one marked six chapters done that the reader had never seen.
+
 ## loophole 1.7.0 — wish 1.0, genie 1.0
 
 **The lessons were rewritten, because the first set taught nothing.** They were

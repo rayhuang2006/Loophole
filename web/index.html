@@ -3,261 +3,366 @@
 <title>Loophole — 學會鑽精靈的漏洞</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  /* A warm paper palette: this is a project about a fairy tale that happens to
-     compile, and a cold IDE grey would be lying about what it is. */
+  /* ------------------------------------------------------------------
+     The look is a printed technical standard that happens to be about a
+     genie -- because that is exactly what this project is. The whitepaper
+     imitates the ISO C++ style; the site should carry the same joke.
+
+     So: a serif for prose and a monospace for machinery, and the contrast
+     between them IS the thesis -- the fairy tale on one side, the machine on
+     the other. Hairline rules instead of cards and shadows, the way a book
+     divides a page. Rubrication: in a manuscript the scribe wrote the body in
+     iron-gall black and marked what mattered in vermilion, and here the same
+     red marks exactly one thing -- the place where the genie was beaten.
+     ------------------------------------------------------------------ */
   :root {
-    --bg: #f7f4ed;  --panel: #fffdf8;  --sunk: #efeae0;
-    --fg: #23201b;  --dim: #7a7469;    --faint: #a8a29a;
-    --line: #ddd6c8;
-    --ink: #8a5a2b;                    /* the accent: old ink */
-    --red: #a8321f;  --green: #2f6a3a; --blue: #1f5772;  --violet: #6b4a8f;
-    --shadow: 0 1px 2px rgba(35,32,27,.05), 0 4px 12px rgba(35,32,27,.04);
+    --paper:  #f4efe4;   /* laid paper */
+    --sheet:  #fbf8f1;   /* the leaf you write on */
+    --sunk:   #e9e2d3;
+    --ink:    #1a1712;   /* iron gall */
+    --ink-2:  #6a6255;
+    --ink-3:  #9c9384;
+    --rule:   #cdc3ae;
+    --rubric: #9c2b18;   /* vermilion: the exploit, and nothing else */
+    --seal:   #1f4c3f;   /* holds, passed, safe */
+    --gold:   #8a6a25;
+    --lapis:  #245070;
+    --plum:   #5d3a6b;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #14130f;  --panel: #1c1a16;  --sunk: #100f0c;
-      --fg: #ece7dc;  --dim: #9b958a;    --faint: #6d675e;
-      --line: #302d26;
-      --ink: #d8a862;
-      --red: #f0897b; --green: #92d69c; --blue: #82c6e0; --violet: #c3a4e8;
-      --shadow: none;
+      --paper:  #14120e;
+      --sheet:  #1a1713;
+      --sunk:   #221e18;
+      --ink:    #ece5d6;
+      --ink-2:  #a49b8a;
+      --ink-3:  #7a7264;
+      --rule:   #35301f;
+      --rubric: #e07a63;
+      --seal:   #86c4a6;
+      --gold:   #d0a45e;
+      --lapis:  #86b8d6;
+      --plum:   #bfa0d0;
     }
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
   body {
-    margin: 0; background: var(--bg); color: var(--fg);
-    font: 15px/1.65 ui-sans-serif, system-ui, "Helvetica Neue", sans-serif;
-    -webkit-font-smoothing: antialiased;
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 16px/1.72 "Iowan Old Style", "Palatino Linotype", Palatino,
+          "Songti TC", "Source Han Serif TC", "Noto Serif CJK TC", Georgia, serif;
   }
+  .wrap { max-width: 1460px; margin: 0 auto; padding: 0 28px; }
 
-  /* ---- masthead --------------------------------------------------- */
-  header { padding: 26px 24px 0; max-width: 1500px; margin: 0 auto; }
-  h1 { margin: 0; font-size: 21px; font-weight: 650; letter-spacing: -.015em; }
-  h1 em { font-style: normal; color: var(--dim); font-weight: 400; }
-  .sub { margin: 5px 0 0; color: var(--dim); font-size: 14px; }
-
-  /* ---- the progress rail ------------------------------------------
-     Grouped by act, because twenty-one numbered pills read as a wall and
-     six named groups read as a shape you can hold. */
-  #rail {
-    max-width: 1500px; margin: 16px auto 0; padding: 0 24px;
-    display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start;
+  /* ---- masthead: a title page ------------------------------------- */
+  header { border-bottom: 2px solid var(--ink); }
+  header .wrap { padding-top: 30px; padding-bottom: 14px; }
+  .brow {
+    font: 500 11px/1 ui-monospace, Menlo, monospace;
+    letter-spacing: .22em; text-transform: uppercase; color: var(--ink-3);
+    margin-bottom: 12px;
   }
-  .actgrp { display: flex; flex-direction: column; gap: 5px; }
+  h1 {
+    margin: 0; font-size: 30px; font-weight: 400; letter-spacing: -.01em;
+  }
+  h1 span { color: var(--ink-2); }
+  .sub {
+    margin: 8px 0 0; color: var(--ink-2); font-size: 15px; max-width: 68ch;
+  }
+  .sub b { color: var(--ink); font-weight: 600; }
+
+  /* ---- contents rail ---------------------------------------------- */
+  #rail { border-bottom: 1px solid var(--rule); background: var(--sheet); }
+  #rail .wrap {
+    padding-top: 11px; padding-bottom: 11px;
+    display: flex; gap: 26px; flex-wrap: wrap; align-items: baseline;
+  }
+  .actgrp { display: flex; align-items: baseline; gap: 9px; }
   .actname {
-    font-size: 10.5px; letter-spacing: .08em; color: var(--faint);
-    text-transform: uppercase; white-space: nowrap;
+    font: 500 11px/1 ui-monospace, Menlo, monospace;
+    letter-spacing: .12em; color: var(--ink-3); white-space: nowrap;
   }
-  .pills { display: flex; gap: 3px; }
+  .pills { display: flex; gap: 2px; }
   .pill {
-    width: 26px; height: 26px; padding: 0; border-radius: 50%;
-    border: 1px solid var(--line); background: var(--panel); color: var(--dim);
-    font: 600 11.5px/1 ui-sans-serif, system-ui, sans-serif; cursor: pointer;
-    transition: transform .1s, background .15s;
+    min-width: 23px; height: 23px; padding: 0 4px;
+    border: 0; border-bottom: 2px solid transparent; background: none;
+    color: var(--ink-3); cursor: pointer;
+    font: 500 12px/23px ui-monospace, Menlo, monospace;
   }
-  .pill:hover { transform: translateY(-1px); }
-  .pill.solved { border-color: var(--green); color: var(--green); }
-  .pill.on { background: var(--ink); border-color: var(--ink); color: #fff; }
-  .pill.on.solved { background: var(--green); border-color: var(--green); color: #fff; }
+  .pill:hover { color: var(--ink); }
+  .pill.solved { color: var(--seal); }
+  .pill.on { color: var(--ink); border-bottom-color: var(--ink); }
+  .pill.on.solved { color: var(--seal); border-bottom-color: var(--seal); }
 
-  /* ---- layout ----------------------------------------------------- */
-  main {
-    max-width: 1500px; margin: 0 auto; padding: 18px 24px 56px;
-    display: grid; gap: 18px; align-items: start;
+  /* ---- layout ------------------------------------------------------ */
+  main { display: block; }
+  main .wrap {
+    padding-top: 26px; padding-bottom: 60px;
+    display: grid; gap: 0; align-items: start;
     grid-template-columns: minmax(0, 1fr);
   }
   @media (min-width: 1080px) {
-    main { grid-template-columns: minmax(330px, 400px) minmax(0, 1fr); }
-    #teach { position: sticky; top: 18px; }
+    main .wrap {
+      grid-template-columns: minmax(360px, 46ch) minmax(0, 1fr);
+      gap: 0 40px;
+    }
+    #teach {
+      position: sticky; top: 22px; max-height: calc(100vh - 44px);
+      overflow-y: auto; padding-right: 34px; border-right: 1px solid var(--rule);
+      scrollbar-width: thin;
+    }
   }
 
-  .card {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: 10px; box-shadow: var(--shadow);
-  }
-
-  /* ---- the lesson ------------------------------------------------- */
-  #teach { padding: 18px 20px 20px; }
+  /* ---- the chapter ------------------------------------------------- */
   .crumb {
-    display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px;
-    font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
-    color: var(--faint);
+    display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px;
+    font: 500 11px/1 ui-monospace, Menlo, monospace;
+    letter-spacing: .14em; color: var(--ink-3);
   }
   .crumb .grow { flex: 1; }
   .crumb button {
-    border: 0; background: none; color: var(--dim); cursor: pointer;
-    font-size: 15px; padding: 0 4px; line-height: 1;
+    border: 0; background: none; color: var(--ink-3); cursor: pointer;
+    font: 15px/1 ui-monospace, Menlo, monospace; padding: 2px 5px;
   }
-  .crumb button:disabled { color: var(--line); cursor: default; }
-  #lesson-title { margin: 0 0 12px; font-size: 19px; font-weight: 650; letter-spacing: -.01em; }
-  #lesson-brief p { margin: 0 0 11px; }
+  .crumb button:hover:not(:disabled) { color: var(--ink); }
+  .crumb button:disabled { color: var(--rule); cursor: default; }
+
+  #lesson-title {
+    margin: 0 0 4px; font-size: 25px; font-weight: 400; line-height: 1.28;
+    letter-spacing: -.012em;
+  }
+  #lesson-title .num {
+    font: 400 25px/1 ui-monospace, Menlo, monospace; color: var(--ink-3);
+    margin-right: 10px;
+  }
+  .rule-under { border: 0; border-top: 1px solid var(--rule); margin: 14px 0 16px; }
+
+  #lesson-brief p { margin: 0 0 13px; }
   #lesson-brief p:last-child { margin-bottom: 0; }
+  #lesson-brief b, #donebox b { font-weight: 600; }
+  #lesson-brief ol { margin: 0 0 13px; padding-left: 1.3em; }
+  #lesson-brief li { margin-bottom: 5px; }
 
-  /* Inline code in prose. Scoped, because the highlighted layer inside the
-     editor is also a <code> and a chip background behind every token there
-     turns the whole pane into grey confetti. */
-  #lesson-brief code, .goal code, #hint code, #donebox code {
-    font: 12.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
-    background: var(--sunk); padding: 1.5px 5px; border-radius: 4px;
+  /* A sentence that carries the point of the chapter. Larger, and set off. */
+  .lead {
+    font-size: 18.5px; line-height: 1.5; margin: 16px 0 !important;
+    padding-left: 15px; border-left: 2px solid var(--rubric);
   }
-  #lesson-brief pre {
-    margin: 10px 0; padding: 11px 13px; background: var(--sunk);
-    border-radius: 7px; overflow-x: auto;
-    font: 12.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* Something the genie or the engineer says out loud. */
+  .say {
+    font-size: 17px; font-style: italic; color: var(--ink-2);
+    margin: 15px 0 15px 18px !important;
   }
 
-  /* Annotated syntax: the line, then what each piece of it is called. */
+  #lesson-brief code, .goal code, #hint code, #donebox code, .say code {
+    font: 13.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-style: normal;
+    background: var(--sunk); padding: 1px 5px; border-radius: 2px;
+  }
+  #lesson-brief pre, #donebox pre {
+    margin: 12px 0; padding: 12px 14px; background: var(--sunk);
+    border-left: 2px solid var(--rule); overflow-x: auto;
+    font: 13px/1.68 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  /* An annotated line of syntax, then what each piece is called. */
   .anno {
-    margin: 11px 0 3px; padding: 9px 12px;
-    background: var(--sunk); border-radius: 7px;
-    font: 13.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    margin: 13px 0 4px; padding: 11px 14px;
+    background: var(--sunk); border-left: 2px solid var(--rule);
+    font: 14.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
   }
-  .anno b { color: var(--violet); font-weight: 600; }
-  .anno i { color: var(--blue);   font-style: normal; }
-  .anno u { color: var(--green);  text-decoration: none; }
-  .anno s { color: var(--red);    text-decoration: none; }
-  .key { margin: 0 0 11px; font-size: 12.5px; color: var(--dim); line-height: 1.75; }
-  .key b { color: var(--violet); } .key i { color: var(--blue); font-style: normal; }
-  .key u { color: var(--green); text-decoration: none; }
-  .key s { color: var(--red); text-decoration: none; }
+  .anno b { color: var(--plum);  font-weight: 600; }
+  .anno i { color: var(--lapis); font-style: normal; }
+  .anno u { color: var(--seal);  text-decoration: none; }
+  .anno s { color: var(--rubric); text-decoration: none; }
+  .key {
+    margin: 0 0 14px !important; font-size: 14px; color: var(--ink-2);
+    line-height: 1.9;
+  }
+  .key b { color: var(--plum); } .key i { color: var(--lapis); font-style: normal; }
+  .key u { color: var(--seal); text-decoration: none; }
+  .key s { color: var(--rubric); text-decoration: none; }
+
+  /* Two things set against each other -- the shape most of this course is in. */
+  .two {
+    display: grid; gap: 0; margin: 14px 0 !important;
+    border-top: 1px solid var(--rule);
+  }
+  .two > div {
+    padding: 10px 0 10px 2px; border-bottom: 1px solid var(--rule);
+    font-size: 14.5px; line-height: 1.66;
+  }
+  .tag {
+    display: block; font: 500 11px/1 ui-monospace, Menlo, monospace;
+    letter-spacing: .1em; color: var(--ink-3); margin-bottom: 4px;
+  }
+  /* A counter or a dial rolling over. */
+  .dial {
+    margin: 13px 0 !important; padding: 10px 0; text-align: center;
+    font: 15px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--ink-2); border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule); letter-spacing: .04em;
+  }
+  .dial b { color: var(--rubric); font-weight: 600; }
 
   .goal {
-    margin: 14px 0 0; padding: 11px 13px;
-    background: var(--sunk); border-left: 3px solid var(--ink);
-    border-radius: 0 7px 7px 0;
+    margin: 18px 0 0 !important; padding: 12px 0 0;
+    border-top: 2px solid var(--ink); font-size: 15px;
   }
-  .goal .lbl { font-weight: 650; color: var(--ink); }
-  .hintrow { margin: 11px 0 0; font-size: 13px; }
+  .goal .lbl {
+    font: 500 11px/1 ui-monospace, Menlo, monospace; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--ink-3); margin-right: 9px;
+  }
+  .hintrow { margin: 11px 0 0 !important; font-size: 14px; }
   .hintrow button {
-    font: inherit; font-size: 12.5px; padding: 4px 11px;
-    border: 1px solid var(--line); background: var(--panel); color: var(--dim);
-    border-radius: 999px; cursor: pointer;
+    font: 500 11px/1 ui-monospace, Menlo, monospace; letter-spacing: .1em;
+    padding: 5px 10px; border: 1px solid var(--rule); background: none;
+    color: var(--ink-3); cursor: pointer;
   }
-  #hint { color: var(--dim); }
+  .hintrow button:hover { color: var(--ink); border-color: var(--ink-2); }
+  #hint { color: var(--ink-2); }
 
+  /* The seal at the foot of the chapter. */
   #donebox {
-    margin: 14px 0 0; padding: 13px 15px; border-radius: 8px;
-    border: 1px solid var(--green);
-    background: color-mix(in srgb, var(--green) 7%, transparent);
+    margin: 20px 0 0; padding: 14px 0 0; border-top: 2px solid var(--seal);
+    font-size: 15px;
   }
   #donebox .head {
-    margin-bottom: 7px; color: var(--green); font-weight: 650; font-size: 13px;
+    font: 500 11px/1 ui-monospace, Menlo, monospace; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--seal); margin-bottom: 10px;
   }
-  #donebox p { margin: 0 0 9px; } #donebox p:last-child { margin-bottom: 0; }
+  #donebox p { margin: 0 0 11px; } #donebox p:last-child { margin-bottom: 0; }
+  #donebox .lead { border-left-color: var(--seal); }
+  .readon {
+    margin: 20px 0 0; padding-top: 14px; border-top: 2px solid var(--ink);
+  }
+  .readon button {
+    font: 500 12px/1 ui-monospace, Menlo, monospace; letter-spacing: .1em;
+    padding: 9px 18px; border: 1px solid var(--ink); background: var(--ink);
+    color: var(--paper); cursor: pointer;
+  }
+  .readon button:hover { background: var(--rubric); border-color: var(--rubric); }
 
-  /* ---- the workspace --------------------------------------------- */
-  #work { display: grid; gap: 14px; grid-template-columns: minmax(0,1fr); }
-  @media (min-width: 1500px) { #work { grid-template-columns: repeat(2, minmax(0,1fr)); } }
-  #work > .full { grid-column: 1 / -1; }
+  /* ---- the workspace ---------------------------------------------- */
+  #work { display: grid; gap: 22px; grid-template-columns: minmax(0,1fr); }
+  @media (min-width: 1080px) { #work { padding-left: 2px; } }
+  @media (min-width: 1560px) {
+    #work { grid-template-columns: repeat(2, minmax(0,1fr)); column-gap: 22px; }
+    #work > .full { grid-column: 1 / -1; }
+  }
+  #work.reading { opacity: .42; filter: saturate(.25); transition: opacity .2s; }
 
-  .pane { overflow: hidden; }
   .panehead {
-    display: flex; align-items: center; gap: 9px;
-    padding: 9px 13px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 0 7px; border-bottom: 1px solid var(--ink);
   }
   .panehead h2 {
-    margin: 0; font-size: 11px; font-weight: 650; letter-spacing: .09em;
-    text-transform: uppercase; color: var(--dim);
+    margin: 0; font: 500 11px/1 ui-monospace, Menlo, monospace;
+    letter-spacing: .16em; text-transform: uppercase; color: var(--ink-2);
   }
   .panehead .grow { flex: 1; }
   .btn {
-    font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 6px;
-    border: 1px solid var(--line); background: var(--panel); color: var(--fg);
-    cursor: pointer;
+    font: 500 12px/1 ui-monospace, Menlo, monospace; letter-spacing: .08em;
+    padding: 7px 14px; border: 1px solid var(--ink-2); background: none;
+    color: var(--ink); cursor: pointer;
   }
   .btn:hover:not(:disabled) { background: var(--sunk); }
-  .btn.primary {
-    background: var(--ink); border-color: var(--ink); color: #fff; font-weight: 600;
-  }
-  .btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
-  .btn:disabled { opacity: .45; cursor: default; }
+  .btn.primary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+  .btn.primary:hover:not(:disabled) { background: var(--rubric); border-color: var(--rubric); }
+  .btn:disabled { opacity: .35; cursor: default; }
   kbd {
-    font: 11px ui-monospace, Menlo, monospace; color: var(--faint);
-    border: 1px solid var(--line); border-radius: 4px; padding: 1px 4px;
+    font: 11px ui-monospace, Menlo, monospace; color: var(--ink-3);
+    letter-spacing: .06em;
   }
 
   /* ---- the editor -------------------------------------------------
-     A transparent textarea sitting exactly on top of a highlighted <pre>.
-     Native editing -- selection, undo, IME -- with colour underneath. A real
-     editor component would be a dependency, and the page is meant to stay
-     three files anybody can read straight through. */
-  .ed { position: relative; }
+     A transparent textarea sitting exactly on a highlighted <pre>: native
+     editing, selection and IME intact, no editor dependency, and the page
+     stays three files somebody can read straight through. */
+  .ed { position: relative; background: var(--sheet); }
   .ed pre, .ed textarea {
-    margin: 0; padding: 13px 15px; border: 0; width: 100%;
-    font: 13px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace;
+    margin: 0; padding: 14px 16px; border: 0; width: 100%;
+    font: 13.5px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace;
     tab-size: 4; white-space: pre; overflow-wrap: normal;
   }
-  .ed pre { min-height: 250px; overflow: auto; pointer-events: none; }
+  .ed pre { min-height: 244px; overflow: auto; pointer-events: none; }
+  .ed.tall pre { min-height: 320px; }
   .ed textarea {
     position: absolute; inset: 0; resize: none; overflow: auto;
-    background: transparent; color: transparent; caret-color: var(--fg);
+    background: transparent; color: transparent; caret-color: var(--rubric);
     -webkit-text-fill-color: transparent;
   }
-  .ed textarea::selection { background: color-mix(in srgb, var(--ink) 28%, transparent); }
+  .ed textarea::selection { background: color-mix(in srgb, var(--gold) 30%, transparent); }
   .ed textarea:focus { outline: 0; }
-  .ed.focus { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ink) 45%, transparent); }
-  .ed.tall pre { min-height: 330px; }
+  .ed.focus { box-shadow: inset 0 0 0 1px var(--ink-2); }
 
-  .t-kw   { color: var(--violet); font-weight: 600; }
-  .t-op   { color: var(--ink); }
-  .t-num  { color: var(--green); }
-  .t-str  { color: var(--red); }
-  .t-com  { color: var(--faint); font-style: italic; }
-  .t-type { color: var(--blue); }
+  .t-kw   { color: var(--plum); font-weight: 600; }
+  .t-op   { color: var(--ink-3); }
+  .t-num  { color: var(--seal); }
+  .t-str  { color: var(--rubric); }
+  .t-com  { color: var(--ink-3); font-style: italic; }
+  .t-type { color: var(--lapis); }
 
-  /* ---- the report ------------------------------------------------- */
+  /* ---- the report -------------------------------------------------- */
   #out {
-    margin: 0; padding: 14px 16px; min-height: 190px; max-height: 62vh;
-    overflow: auto; white-space: pre; background: var(--panel);
-    font: 12.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+    margin: 0; padding: 15px 17px; min-height: 200px; max-height: 60vh;
+    overflow: auto; white-space: pre; background: var(--sheet);
+    font: 13px/1.62 ui-monospace, SFMono-Regular, Menlo, monospace;
   }
-  #out.waiting { color: var(--dim); }
+  #out.waiting { color: var(--ink-3); font-style: italic; }
   .chip {
-    display: inline-block; padding: 2px 10px; border-radius: 999px;
-    font-size: 11.5px; font-weight: 650; border: 1px solid currentColor;
+    font: 500 11px/1 ui-monospace, Menlo, monospace; letter-spacing: .1em;
+    padding: 4px 9px; border: 1px solid currentColor;
   }
-  .c0 { color: var(--green); } .c1 { color: var(--ink); } .c2 { color: var(--red); }
-  .a-red { color: var(--red); font-weight: 600; }
-  .a-green { color: var(--green); font-weight: 600; }
-  .a-cyan { color: var(--blue); }
+  .c0 { color: var(--seal); } .c1 { color: var(--rubric); } .c2 { color: var(--gold); }
+  .a-red { color: var(--rubric); font-weight: 600; }
+  .a-green { color: var(--seal); font-weight: 600; }
+  .a-cyan { color: var(--lapis); }
   .a-bold { font-weight: 600; }
 
-  footer {
-    max-width: 1500px; margin: 0 auto; padding: 0 24px 34px;
-    color: var(--faint); font-size: 12.5px;
+  footer { border-top: 1px solid var(--rule); }
+  footer .wrap {
+    padding-top: 15px; padding-bottom: 40px;
+    font: 11px/1.8 ui-monospace, Menlo, monospace; letter-spacing: .08em;
+    color: var(--ink-3);
   }
-  footer a { color: var(--dim); }
-  a { color: var(--ink); }
+  footer a { color: var(--ink-2); }
+  a { color: var(--rubric); }
 </style>
 
 <header>
-  <h1>Loophole <em>— 學會鑽精靈的漏洞</em></h1>
-  <p class="sub">
-    二十一關。編譯器跑在你的瀏覽器裡，沒有伺服器。
-    <b>過關與否由編譯器自己判</b>，不是比對你有沒有寫出標準答案。
-  </p>
+  <div class="wrap">
+    <div class="brow">Loophole · 二十八章 · 全部跑在你的瀏覽器裡</div>
+    <h1>把精靈的漏洞<span>編譯出來</span></h1>
+    <p class="sub">
+      一個工程師笑話，被當成一份技術規格認真對待。
+      你會親手寫出六種精靈擋不住的招式——<b>而且不是我說你成功了，是編譯器說的。</b>
+    </p>
+  </div>
 </header>
 
-<div id="rail"></div>
+<div id="rail"><div class="wrap"></div></div>
 
 <main>
-  <section id="teach" class="card">
+  <div class="wrap">
+  <section id="teach">
     <div class="crumb">
       <span id="lesson-act"></span>
       <span class="grow"></span>
-      <button id="prev" title="上一關">←</button>
-      <button id="next" title="下一關">→</button>
+      <button id="prev" title="上一章">←</button>
+      <button id="next" title="下一章">→</button>
     </div>
-    <h2 id="lesson-title"></h2>
+    <h1 id="lesson-title"></h1>
+    <hr class="rule-under">
     <div id="lesson-brief"></div>
     <p class="goal"><span class="lbl">目標</span> <span id="lesson-goal"></span></p>
     <p class="hintrow"><button id="hintbtn">看提示</button> <span id="hint" hidden></span></p>
+    <div class="readon" id="readon" hidden><button id="readnext">讀完了，下一章 →</button></div>
     <div id="donebox" hidden></div>
   </section>
 
   <div id="work">
-    <section class="card pane">
+    <section class="pane">
       <div class="panehead">
         <h2>wish — 你的願望</h2>
         <span class="grow"></span>
@@ -273,7 +378,7 @@
       </div>
     </section>
 
-    <section class="card pane">
+    <section class="pane">
       <div class="panehead">
         <h2>genie — 精靈的規矩</h2>
         <span class="grow"></span>
@@ -286,7 +391,7 @@
       </div>
     </section>
 
-    <section class="card pane full">
+    <section class="pane full">
       <div class="panehead">
         <h2>report — 判決</h2>
         <span class="grow"></span>
@@ -295,12 +400,15 @@
       <pre id="out" class="waiting">載入編譯器…</pre>
     </section>
   </div>
+  </div>
 </main>
 
 <footer>
-  <span id="ver"></span> ·
-  <a href="https://github.com/rayhuang2006/Loophole">原始碼</a> ·
-  <a href="https://github.com/rayhuang2006/Loophole/blob/main/docs/spec/loophole-1.0.md">語言規格</a>
+  <div class="wrap">
+    <span id="ver"></span> ·
+    <a href="https://github.com/rayhuang2006/Loophole">原始碼</a> ·
+    <a href="https://github.com/rayhuang2006/Loophole/blob/main/docs/spec/loophole-1.0.md">語言規格</a>
+  </div>
 </footer>
 
 <script src="./lessons.js"></script>
@@ -443,7 +551,11 @@
   }
 
   // ---- lessons -------------------------------------------------------
-  const KEY = 'loophole.solved.v2';
+  // The key carries a version because progress is stored by chapter id, and
+  // the ids survive a rewrite of the course. Reusing the key across the last
+  // rewrite marked six chapters done that the reader had never seen: the old
+  // 21-lesson set shared ids with this one. Bump it whenever chapters change.
+  const KEY = 'loophole.solved.v3';
   let solved = new Set();
   try { solved = new Set(JSON.parse(localStorage.getItem(KEY) || '[]')); } catch (_) {}
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify([...solved])); } catch (_) {} };
@@ -452,13 +564,13 @@
   const L = () => LESSONS[at];
 
   function drawRail() {
-    const rail = $('rail');
+    const rail = $('rail').querySelector('.wrap');
     rail.textContent = '';
     let n = 0;
     for (const act of [...new Set(LESSONS.map(l => l.act))]) {
       const grp = document.createElement('div'); grp.className = 'actgrp';
       const nm = document.createElement('div'); nm.className = 'actname';
-      nm.textContent = act.replace(/^[一二三四五六七]、/, '');
+      nm.textContent = act;
       const pills = document.createElement('div'); pills.className = 'pills';
       for (const l of LESSONS.filter(x => x.act === act)) {
         const i = n++;
@@ -478,21 +590,37 @@
     at = Math.max(0, Math.min(LESSONS.length - 1, i));
     const l = L();
     $('lesson-act').textContent = l.act;
-    $('lesson-title').textContent = (at + 1) + '. ' + l.title;
+    $('lesson-title').innerHTML =
+      '<span class="num">' + String(at + 1).padStart(2, '0') + '</span>' + esc(l.title);
     $('lesson-brief').innerHTML = para(l.brief);
-    $('lesson-goal').innerHTML = l.goal;
-    $('hintbtn').parentElement.hidden = !l.hint;
+
+    // A reading chapter has no goal and nothing to type. Dimming the workspace
+    // rather than hiding it keeps the page from jumping about, and says plainly
+    // that there is nothing over there to do yet.
+    const reading = !!l.read;
+    $('lesson-goal').parentElement.hidden = reading;
+    $('readon').hidden = !reading;
+    $('work').classList.toggle('reading', reading);
+    if (!reading) $('lesson-goal').innerHTML = l.goal;
+    // A reading chapter keeps whatever is in the editors unless it brings its
+    // own illustration. Blanking them would read as broken rather than as
+    // "nothing to do here" -- the dimming already says that.
+    if (l.wish !== undefined) {
+      $('wish').value = l.wish;
+      $('genie').value = (l.genie === null || l.genie === undefined) ? builtinGenie : l.genie;
+      paintWish(); paintGenie();
+    }
+    $('hintbtn').parentElement.hidden = reading || !l.hint;
     $('hint').hidden = true;
     $('hint').innerHTML = l.hint || '';
     $('hintbtn').textContent = '看提示';
-    $('wish').value = l.wish;
-    $('genie').value = (l.genie === null || l.genie === undefined) ? builtinGenie : l.genie;
-    paintWish(); paintGenie();
+
     $('prev').disabled = at === 0;
     $('next').disabled = at === LESSONS.length - 1;
     showDone(solved.has(l.id));
     out.className = 'waiting';
-    out.textContent = l.huntOnly ? '按 Hunt。' : '按 Run。';
+    out.textContent = reading ? '這一章沒有東西要跑。'
+                              : (l.huntOnly ? '按 Hunt。' : '按 Run。');
     verdict.textContent = '';
     drawRail();
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -530,6 +658,11 @@
   $('prev').onclick = () => load(at - 1);
   $('next').onclick = () => load(at + 1);
   $('reset').onclick = () => load(at);
+  $('readnext').onclick = () => {
+    const l = L();
+    if (!solved.has(l.id)) { solved.add(l.id); save(); }
+    if (at < LESSONS.length - 1) load(at + 1); else { drawRail(); showDone(true); }
+  };
   $('hintbtn').onclick = () => {
     const h = $('hint');
     h.hidden = !h.hidden;
