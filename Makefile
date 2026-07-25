@@ -59,9 +59,17 @@ wasm: loophole.node.js web/loophole.js
 # `loophole.node.js` is a prerequisite, so a failed wasm build stops here rather
 # than letting the suite pass against whatever was left in the directory from
 # last time. A check that can succeed on a stale artifact is not a check.
+#
+# The node line goes through `sh -c` on purpose. emsdk puts its own root on
+# PATH, and that root contains a subdirectory literally named `node`. A shell
+# searching PATH sees the match is not executable and keeps looking; GNU make 4
+# execs a simple recipe line directly and stops at the first match, reporting
+# "node: Permission denied". It only bites when emsdk comes first on PATH, which
+# is what `setup-emsdk` does on CI and what `emsdk_env.sh` does for anyone who
+# sources it in a fresh shell -- so this is not a CI workaround.
 wasm-check: loophole loophole.node.js web/loophole.js
 	@./ci/wasm-check.sh
-	@node ci/lessons-check.mjs
+	@sh -c 'node ci/lessons-check.mjs'
 
 install: loophole
 	@mkdir -p $(DESTDIR)$(BINDIR)
