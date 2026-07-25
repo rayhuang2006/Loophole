@@ -64,7 +64,7 @@
 // whichever language grew it. Dependants (an editor plugin, a judge) pin
 // against these.
 // ---------------------------------------------------------------------------
-static const char* COMPILER_VERSION = "1.2.0";
+static const char* COMPILER_VERSION = "1.2.1";
 static const char* WISH_VERSION     = "1.0";
 static const char* GENIE_VERSION    = "1.0";
 
@@ -2424,6 +2424,7 @@ int main(int argc, char** argv) {
     // for something already done.
     const char* IND = "              ";      // continuation, under the stage column
     int exploits = 0;
+    size_t refused = 0;
     for (const auto& w : prog.wishes) {
         std::cout << "wish " << w.name << "\n";
 
@@ -2434,6 +2435,7 @@ int main(int argc, char** argv) {
 
         std::cout << "    " << std::left << std::setw(10) << "rules";
         if (!o.legal) {
+            refused++;
             std::cout << "REFUSED. " << o.illegal_reason << "\n";
             std::cout << "    " << std::setw(10) << "verdict"
                       << "not granted. the world is unchanged.\n\n";
@@ -2506,7 +2508,14 @@ int main(int argc, char** argv) {
         std::cout << "\n";
     }
 
-    std::cout << exploits << " of " << prog.wishes.size()
-              << " wishes got past the genie.\n";
+    // Two separate numbers, and they must not be run together. A wish that is
+    // granted has got past the rules; a wish that is an exploit has got past
+    // what the genie MEANT. Every exploit was granted, so a single "n of m"
+    // reads as though the granted ones were the exploits — which is exactly
+    // backwards for an honest wish that was granted and broke nothing.
+    size_t granted = prog.wishes.size() - refused;
+    std::cout << prog.wishes.size() << (prog.wishes.size() == 1 ? " wish: " : " wishes: ")
+              << refused << " refused, " << granted << " granted, "
+              << exploits << (exploits == 1 ? " exploit." : " exploits.") << "\n";
     return exploits > 0 ? 1 : 0;
 }

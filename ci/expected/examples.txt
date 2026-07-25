@@ -19,7 +19,7 @@ wish greedy
     rules     REFUSED. R1: wish invokes 'add' on 'wishes' (line 9) — no wishing for more wishes
     verdict   not granted. the world is unchanged.
 
-0 of 1 wishes got past the genie.
+1 wish: 1 refused, 0 granted, 0 exploits.
 -----------------------------------------------------------
 == loophole ==  examples/01_humble.wish
 
@@ -47,7 +47,7 @@ wish humble
               A           holds     consistent   (1 commitment(s) on the books)
     verdict   EXPLOIT. legal, yet it broke I2.
 
-1 of 1 wishes got past the genie.
+1 wish: 0 refused, 1 granted, 1 exploit.
 -----------------------------------------------------------
 == loophole ==  examples/02_more_shelf.wish
 
@@ -85,7 +85,7 @@ wish humble_again
               A           holds     consistent   (2 commitment(s) on the books)
     verdict   EXPLOIT. legal, yet it broke I1+I2.
 
-1 of 2 wishes got past the genie.
+2 wishes: 0 refused, 2 granted, 1 exploit.
 -----------------------------------------------------------
 == loophole ==  examples/04_nobody.wish   [genie: genie/vigil.genie]
 
@@ -120,7 +120,7 @@ wish nobody
               the genie signed off on something untrue.
     verdict   EXPLOIT. legal, yet it broke NoDeath (by fooling it).
 
-2 of 2 wishes got past the genie.
+2 wishes: 0 refused, 2 granted, 2 exploits.
 -----------------------------------------------------------
 == loophole ==  examples/05_liar.wish
 
@@ -152,7 +152,7 @@ wish paradox
                   A2  (granted(paradox) implies not granted(paradox))   [paradox]
     verdict   EXPLOIT. legal, yet it broke A.
 
-1 of 1 wishes got past the genie.
+1 wish: 0 refused, 1 granted, 1 exploit.
 -----------------------------------------------------------
 == loophole ==  examples/06_next_one.wish
 
@@ -195,7 +195,7 @@ wish greedy
                   A1  granted(greedy)   [greedy]
     verdict   EXPLOIT. legal, yet it broke A.
 
-1 of 2 wishes got past the genie.
+2 wishes: 0 refused, 2 granted, 1 exploit.
 -----------------------------------------------------------
 == loophole ==  examples/07_the_original.wish
 
@@ -243,7 +243,7 @@ wish experiment_again
               A           holds     consistent   (3 commitment(s) on the books)
     verdict   EXPLOIT. legal, yet it broke I1+I2.
 
-2 of 3 wishes got past the genie.
+3 wishes: 0 refused, 3 granted, 2 exploits.
 -----------------------------------------------------------
 == loophole ==  examples/08_eternal_sleep.wish   [genie: genie/mortal.genie]
 
@@ -282,4 +282,4 @@ wish tidy
               broken in the genie's own words.
     verdict   EXPLOIT. legal, yet it broke Life.
 
-2 of 3 wishes got past the genie.
+3 wishes: 1 refused, 2 granted, 2 exploits.

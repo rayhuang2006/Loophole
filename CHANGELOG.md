@@ -6,6 +6,16 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.2.1 — wish 1.0, genie 1.0
+
+- **The summary line said the opposite of what it meant.** `0 of 1 wishes got
+  past the genie` was printed for a wish that had just been granted and had
+  broken nothing — and "got past the genie" is the natural way to say "was
+  granted", so the count read as a contradiction. Being granted and being an
+  exploit are two different things, and every exploit is also granted, so one
+  ratio cannot carry both. The line now reports all three counts:
+  `1 wish: 0 refused, 1 granted, 0 exploits.`
+
 ## loophole 1.2.0 — wish 1.0, genie 1.0
 
 **The report was rewritten.** It was written by someone who already knew the
