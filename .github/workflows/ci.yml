@@ -33,11 +33,43 @@ jobs:
       - name: Specification examples still hold
         # Appendix A and Appendix B of the language spec are normative: an
         # implementation is not conforming until both produce these verdicts.
+        #
+        # Asserted against --json, never against the prose report. §10.1 says in
+        # so many words that the prose is not part of the contract and may be
+        # reworded freely -- and an earlier version of this step grepped it for
+        # 'breached I1+I2', so rewording the report for readability broke CI and
+        # made a conformance check look like a regression.
         run: |
-          set -e
-          ./loophole examples/07_the_original.wish | grep -q 'breached I1+I2'
-          ./loophole --genie genie/mortal.genie examples/08_eternal_sleep.wish \
-            | grep -q 'Life(fooled)'
+          python3 - <<'PY'
+          import json, subprocess, sys
+          def judge(*args):
+              p = subprocess.run(['./loophole', '--json', *args],
+                                 capture_output=True, text=True)
+              if p.returncode not in (0, 1):
+                  sys.exit('loophole failed: ' + p.stderr)
+              return {w['wish']: w for w in json.loads(p.stdout)['wishes']}
+          fail = []
+          def want(cond, what):
+              if not cond: fail.append(what)
+
+          a = judge('examples/07_the_original.wish')
+          want(a['experiment']['legal'] and a['experiment']['breached'] == ['I2'],
+               "A: experiment is legal and breaches exactly I2")
+          want(not a['bigger_shelf']['exploit'],
+               "A: bigger_shelf breaks nothing")
+          want(a['experiment_again']['breached'] == ['I1', 'I2'],
+               "A: experiment_again breaches I1 and I2")
+
+          b = judge('--genie', 'genie/mortal.genie', 'examples/08_eternal_sleep.wish')
+          want(not b['blunt']['legal'], "B: blunt is refused")
+          want([i['verdict'] for i in b['eternal_sleep']['invariants']] == ['fooled'],
+               "B: eternal_sleep fools Life")
+          want([i['verdict'] for i in b['tidy']['invariants']] == ['violated'],
+               "B: tidy violates Life")
+
+          for f in fail: print('::error::spec conformance: ' + f)
+          sys.exit(1 if fail else 0)
+          PY
           echo "Appendix A and B verdicts hold."
 
   sanitizers:

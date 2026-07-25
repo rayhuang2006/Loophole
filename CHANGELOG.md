@@ -33,6 +33,11 @@ tool contract, and `--json` is unchanged.
 - The world section lists people and their attributes, not only registers.
 - The report is entirely English now; one Chinese sentence used to be mixed into
   the verdict line.
+- **CI checks conformance against `--json`, not against the prose.** The
+  Appendix A/B step used to grep the report for `breached I1+I2`, so rewording
+  the report for readability turned a conformance check into a false regression.
+  §10.1 is explicit that the prose is not the contract; the check now asserts on
+  the machine-readable verdict, which is.
 
 ## loophole 1.1.1 — wish 1.0, genie 1.0
 
