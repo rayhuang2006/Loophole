@@ -62,7 +62,28 @@ check_one fingerprints || rc=1
 if [ "$UPDATE" = "0" ]; then
   ./loophole examples/00_naive.wish >/dev/null 2>&1; [ $? -eq 0 ] || { echo "FAIL exit code: expected 0 (no exploit)"; rc=1; }
   ./loophole examples/01_humble.wish >/dev/null 2>&1; [ $? -eq 1 ] || { echo "FAIL exit code: expected 1 (exploit)"; rc=1; }
-  ./loophole /nonexistent.wish        >/dev/null 2>&1; [ $? -eq 2 ] || { echo "FAIL exit code: expected 2 (error)"; rc=1; }
+  ./loophole /nonexistent.wish        >/dev/null 2>&1; [ $? -eq 2 ] || { echo "FAIL exit code: expected 2 (missing file)"; rc=1; }
+  # A syntax error is "could not be judged" = 2, never 1. It used to exit 1,
+  # which tells a script that a file that does not even parse had found a hole
+  # in the genie -- and this suite only ever checked the missing-file path, so
+  # nothing caught it. One case per way of failing, not one per exit code.
+  tmp=$(mktemp -d)
+  printf 'register w : uint<2> = 3\nwish x { sub w, 1; }\n' > "$tmp/lex.wish"
+  printf 'register w : uint<99> = 3\nwish x { sub w, 1 }\n'  > "$tmp/width.wish"
+  printf 'register w : uint<2> = 3\nwish x { sub w\n'         > "$tmp/parse.wish"
+  for bad in lex width parse; do
+    ./loophole "$tmp/$bad.wish" >/dev/null 2>&1
+    [ $? -eq 2 ] || { echo "FAIL exit code: $bad error should be 2"; rc=1; }
+  done
+  printf 'counter w\ntoll 1\nrule R { layer nope forbid add }\n' > "$tmp/bad.genie"
+  ./loophole --genie "$tmp/bad.genie" examples/01_humble.wish >/dev/null 2>&1
+  [ $? -eq 2 ] || { echo "FAIL exit code: a bad genie should be 2"; rc=1; }
+  # Escape codes must never reach a pipe: the goldens and every grep downstream
+  # are plain text.
+  if ./loophole "$tmp/lex.wish" 2>&1 | grep -q $'\033'; then
+    echo "FAIL colour leaked into a non-tty"; rc=1
+  fi
+  rm -rf "$tmp"
   # loophole exits 1 here (an exploit was found), which is correct — so capture the
   # output first rather than piping, or pipefail would read that as a failure.
   json_out="$(./loophole --json examples/01_humble.wish)"

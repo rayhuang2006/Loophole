@@ -6,6 +6,50 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.3.0 — wish 1.0, genie 1.0
+
+**A syntax error exited 1, which is the code for "an exploit was found."**
+Anything that could not be parsed reported itself as a successful hunt: the
+README's own `loophole --hunt w.wish && echo "airtight"` would read a typo in
+the genie file as a hole in the genie. All three parsers now exit 2. The
+regression suite only ever checked the missing-file path, so nothing caught it;
+it now covers a lex error, a bad width, a truncated parse and a bad genie —
+one case per way of failing, rather than one per exit code.
+
+**Diagnostics were rewritten.** Nobody knows this language, so every error is
+somebody's first encounter with a rule they did not know existed — and
+`lex error (line 12): unexpected character ';'` spends that moment saying
+nothing. Errors now quote the line, point at the column, and state the rule:
+
+```
+error: unexpected character ';'
+ --> playground.wish:4:17
+  |
+4 |     sub candy, 2;
+  |                 ^
+  |
+help: statements are not terminated in Loophole -- one ends where its line
+      does. Delete the ';'.
+```
+
+- Tokens carry a column, so the caret lands on the offending token rather than
+  on the line. Diagnostics raised after a value has been validated point back at
+  the token they are about, not at whatever the parser has since moved to.
+- Specific help for the mistakes the design makes likely: `;` (no statement
+  terminators), a non-ASCII byte (§3 is ASCII-only, and why), `/` or `*`
+  (comments are `#`), `[` (sets use braces), a width outside 1..64, and an
+  unknown `layer` (there are two, because there are two programs).
+- **"did you mean" on an unknown operation.** Candidates are derived from the
+  operations table and the names in scope, so adding an operation improves the
+  suggestion with no second place to update. A prefix match outranks edit
+  distance, since the operations have short names and writing the whole word —
+  `subtract` for `sub` — is five edits away and would never clear a threshold.
+- **Colour, only when a human is looking.** Disabled when stderr is not a
+  terminal and when `NO_COLOR` is set, so nothing leaks into a pipe, a golden,
+  or a `grep`. CI asserts this.
+
+The report itself is unchanged, and so is `--json`.
+
 ## loophole 1.2.1 — wish 1.0, genie 1.0
 
 - **The summary line said the opposite of what it meant.** `0 of 1 wishes got

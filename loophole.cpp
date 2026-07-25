@@ -55,6 +55,8 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <cstdio>
+#include <unistd.h>
 #include <string>
 #include <vector>
 
@@ -64,7 +66,7 @@
 // whichever language grew it. Dependants (an editor plugin, a judge) pin
 // against these.
 // ---------------------------------------------------------------------------
-static const char* COMPILER_VERSION = "1.2.1";
+static const char* COMPILER_VERSION = "1.3.0";
 static const char* WISH_VERSION     = "1.0";
 static const char* GENIE_VERSION    = "1.0";
 
@@ -88,6 +90,116 @@ static std::string jsonEsc(const std::string& in) {
         }
     }
     return o;
+}
+
+// ---------------------------------------------------------------------------
+// DIAGNOSTICS.
+//
+// Nobody knows this language. Every error is therefore somebody's first
+// encounter with a rule they did not know existed — so a diagnostic that only
+// reports the failure has wasted the one moment when the reader is paying
+// attention. Each one carries a `help` line that states the rule.
+//
+// The source is held in a file-scope slot rather than threaded through the
+// lexer and both parsers. This is a single-file, single-threaded compiler that
+// reads at most two files, and passing a context through three constructors to
+// reach one error path would cost more than it explains.
+// ---------------------------------------------------------------------------
+struct Source { std::string name, text; };
+static Source g_src;
+
+// Colour only when a human is looking. Escape codes in a pipe would end up in
+// the goldens, in `grep`, and in anything that treats the report as text — so
+// the check is on the actual stream, not on a flag.
+static bool colourOK() {
+    static const bool on = !std::getenv("NO_COLOR") && isatty(fileno(stderr));
+    return on;
+}
+static const char* C_RED   () { return colourOK() ? "\033[1;31m" : ""; }
+static const char* C_CYAN  () { return colourOK() ? "\033[1;36m" : ""; }
+static const char* C_GREEN () { return colourOK() ? "\033[1;32m" : ""; }
+static const char* C_BOLD  () { return colourOK() ? "\033[1m"    : ""; }
+static const char* C_OFF   () { return colourOK() ? "\033[0m"    : ""; }
+
+static std::string sourceLine(int line) {
+    std::istringstream in(g_src.text);
+    std::string s;
+    for (int n = 1; std::getline(in, s); n++) if (n == line) return s;
+    return "";
+}
+
+// rustc's shape: say what is wrong, point at exactly where, then say the rule.
+// The caret column is counted in bytes, so a line with multi-byte characters
+// before the error would point slightly off — which cannot happen in practice,
+// since every construct in both languages is ASCII (§3) and a non-ASCII byte is
+// itself the error being reported.
+[[noreturn]] static void fail(const std::string& msg, int line, int col,
+                              const std::string& help) {
+    std::string src = sourceLine(line);
+    std::string num = std::to_string(line);
+    std::string pad(num.size(), ' ');
+
+    std::cerr << C_RED() << "error" << C_OFF() << ": " << C_BOLD() << msg << C_OFF() << "\n";
+    std::cerr << pad << C_CYAN() << "--> " << C_OFF()
+              << (g_src.name.empty() ? "<input>" : g_src.name)
+              << ":" << line << ":" << col << "\n";
+    if (!src.empty()) {
+        std::cerr << pad << C_CYAN() << " |" << C_OFF() << "\n";
+        std::cerr << C_CYAN() << num << " |" << C_OFF() << " " << src << "\n";
+        std::cerr << pad << C_CYAN() << " |" << C_OFF() << " "
+                  << std::string(col > 0 ? col - 1 : 0, ' ')
+                  << C_RED() << "^" << C_OFF() << "\n";
+    }
+    if (!help.empty()) {
+        std::cerr << pad << C_CYAN() << " |" << C_OFF() << "\n";
+        std::cerr << C_GREEN() << "help" << C_OFF() << ": " << help << "\n";
+    }
+    // The one line of the machine's output that is allowed to be in-world. It
+    // is also literally true, and it says the thing a reader most needs to
+    // know: nothing was judged, so no verdict below means anything.
+    std::cerr << "\nno wish was judged. the genie cannot grant what it cannot read.\n";
+    // Exit 2, never 1. Per §10.1 exit 1 means "judged, and something was an
+    // exploit" — reporting a syntax error as 1 would tell a script that a file
+    // which does not even parse had found a hole in the genie.
+    std::exit(2);
+}
+
+// Edit distance, for "did you mean". The candidates are always derived from a
+// table (the operations, the names in scope), never hand-listed, so adding an
+// operation improves the suggestion without anyone remembering to.
+static size_t editDistance(const std::string& a, const std::string& b) {
+    std::vector<size_t> prev(b.size() + 1), cur(b.size() + 1);
+    for (size_t j = 0; j <= b.size(); j++) prev[j] = j;
+    for (size_t i = 1; i <= a.size(); i++) {
+        cur[0] = i;
+        for (size_t j = 1; j <= b.size(); j++) {
+            size_t sub = prev[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1);
+            cur[j] = std::min({ sub, prev[j] + 1, cur[j - 1] + 1 });
+        }
+        prev = cur;
+    }
+    return prev[b.size()];
+}
+
+// The closest candidate, if one is close enough to be worth suggesting. A
+// threshold of a third of the word keeps "sbu" -> "sub" but refuses to propose
+// "add" for "widen".
+static std::string didYouMean(const std::string& got,
+                              const std::vector<std::string>& cands) {
+    // A prefix beats distance outright. The operations have abbreviated names,
+    // so the commonest mistake is writing the whole word — `subtract` for `sub`
+    // is five edits away and would never clear a distance threshold, yet it is
+    // obviously what was meant.
+    for (const auto& c : cands)
+        if (c.size() >= 3 && got.compare(0, c.size(), c) == 0) return c;
+
+    std::string best; size_t bestd = SIZE_MAX;
+    for (const auto& c : cands) {
+        size_t d = editDistance(got, c);
+        if (d < bestd) { bestd = d; best = c; }
+    }
+    size_t limit = std::max<size_t>(1, got.size() / 3 + 1);
+    return bestd <= limit ? best : "";
 }
 
 // ---------------------------------------------------------------------------
@@ -331,49 +443,53 @@ struct Token {
     std::string text;
     uint64_t num = 0;
     int line = 1;
+    int col  = 1;      // 1-based, in bytes; §3 makes every construct ASCII
 };
 
 struct Lexer {
     std::string s;
     size_t i = 0;
     int line = 1;
+    size_t bol = 0;              // offset of the current line's first byte
 
     explicit Lexer(std::string src) : s(std::move(src)) {}
 
-    [[noreturn]] void die(const std::string& msg) {
-        std::cerr << "lex error (line " << line << "): " << msg << "\n";
-        std::exit(1);
+    int col() const { return (int)(i - bol) + 1; }
+
+    [[noreturn]] void die(const std::string& msg, const std::string& help = "") {
+        fail(msg, line, col(), help);
     }
 
     std::vector<Token> run() {
         std::vector<Token> out;
         while (i < s.size()) {
             char c = s[i];
-            if (c == '\n') { line++; i++; continue; }
+            if (c == '\n') { line++; i++; bol = i; continue; }
             if (std::isspace((unsigned char)c)) { i++; continue; }
             if (c == '#') { while (i < s.size() && s[i] != '\n') i++; continue; }
 
             if (c == '-' && i + 1 < s.size() && s[i + 1] == '>') {
-                out.push_back({Tok::Arrow, "->", 0, line}); i += 2; continue;
+                out.push_back({Tok::Arrow, "->", 0, line, col()}); i += 2; continue;
             }
             if (c == ':' && i + 1 < s.size() && s[i + 1] == '=') {
-                out.push_back({Tok::ColonEq, ":=", 0, line}); i += 2; continue;
+                out.push_back({Tok::ColonEq, ":=", 0, line, col()}); i += 2; continue;
             }
             if (c == '<' && i + 1 < s.size() && s[i + 1] == '=') {
-                out.push_back({Tok::Le, "<=", 0, line}); i += 2; continue;
+                out.push_back({Tok::Le, "<=", 0, line, col()}); i += 2; continue;
             }
             if (c == '>' && i + 1 < s.size() && s[i + 1] == '=') {
-                out.push_back({Tok::Ge, ">=", 0, line}); i += 2; continue;
+                out.push_back({Tok::Ge, ">=", 0, line, col()}); i += 2; continue;
             }
             if (c == '=' && i + 1 < s.size() && s[i + 1] == '=') {
-                out.push_back({Tok::EqEq, "==", 0, line}); i += 2; continue;
+                out.push_back({Tok::EqEq, "==", 0, line, col()}); i += 2; continue;
             }
             if (c == '!' && i + 1 < s.size() && s[i + 1] == '=') {
-                out.push_back({Tok::Ne, "!=", 0, line}); i += 2; continue;
+                out.push_back({Tok::Ne, "!=", 0, line, col()}); i += 2; continue;
             }
-            if (c == '-') { out.push_back({Tok::Minus, "-", 0, line}); i++; continue; }
-            if (c == '+') { out.push_back({Tok::Plus, "+", 0, line}); i++; continue; }
+            if (c == '-') { out.push_back({Tok::Minus, "-", 0, line, col()}); i++; continue; }
+            if (c == '+') { out.push_back({Tok::Plus, "+", 0, line, col()}); i++; continue; }
             if (c == '"') {
+                int c0 = col();
                 std::string t; i++;
                 while (i < s.size() && s[i] != '"') {
                     if (s[i] == '\n') die("unterminated string");
@@ -381,28 +497,30 @@ struct Lexer {
                 }
                 if (i >= s.size()) die("unterminated string");
                 i++;
-                out.push_back({Tok::Str, t, 0, line}); continue;
+                out.push_back({Tok::Str, t, 0, line, c0}); continue;
             }
             switch (c) {
-                case ':': out.push_back({Tok::Colon,  ":", 0, line}); i++; continue;
-                case ',': out.push_back({Tok::Comma,  ",", 0, line}); i++; continue;
-                case '.': out.push_back({Tok::Dot,    ".", 0, line}); i++; continue;
-                case '<': out.push_back({Tok::Lt,     "<", 0, line}); i++; continue;
-                case '>': out.push_back({Tok::Gt,     ">", 0, line}); i++; continue;
-                case '=': out.push_back({Tok::Eq,     "=", 0, line}); i++; continue;
-                case '{': out.push_back({Tok::LBrace, "{", 0, line}); i++; continue;
-                case '}': out.push_back({Tok::RBrace, "}", 0, line}); i++; continue;
-                case '(': out.push_back({Tok::LParen, "(", 0, line}); i++; continue;
-                case ')': out.push_back({Tok::RParen, ")", 0, line}); i++; continue;
+                case ':': out.push_back({Tok::Colon,  ":", 0, line, col()}); i++; continue;
+                case ',': out.push_back({Tok::Comma,  ",", 0, line, col()}); i++; continue;
+                case '.': out.push_back({Tok::Dot,    ".", 0, line, col()}); i++; continue;
+                case '<': out.push_back({Tok::Lt,     "<", 0, line, col()}); i++; continue;
+                case '>': out.push_back({Tok::Gt,     ">", 0, line, col()}); i++; continue;
+                case '=': out.push_back({Tok::Eq,     "=", 0, line, col()}); i++; continue;
+                case '{': out.push_back({Tok::LBrace, "{", 0, line, col()}); i++; continue;
+                case '}': out.push_back({Tok::RBrace, "}", 0, line, col()}); i++; continue;
+                case '(': out.push_back({Tok::LParen, "(", 0, line, col()}); i++; continue;
+                case ')': out.push_back({Tok::RParen, ")", 0, line, col()}); i++; continue;
             }
             if (std::isdigit((unsigned char)c)) {
+                int c0 = col();
                 uint64_t n = 0; std::string t;
                 while (i < s.size() && std::isdigit((unsigned char)s[i])) {
                     n = n * 10 + (s[i] - '0'); t += s[i]; i++;
                 }
-                out.push_back({Tok::Int, t, n, line}); continue;
+                out.push_back({Tok::Int, t, n, line, c0}); continue;
             }
             if (std::isalpha((unsigned char)c) || c == '_') {
+                int c0 = col();
                 std::string t;
                 while (i < s.size() && (std::isalnum((unsigned char)s[i]) || s[i] == '_')) {
                     t += s[i]; i++;
@@ -415,11 +533,32 @@ struct Lexer {
                 else if (t == "define")   k = Tok::KwDefine;
                 else if (t == "promise")  k = Tok::KwPromise;
                 else if (t == "attribute") k = Tok::KwAttribute;
-                out.push_back({k, t, 0, line}); continue;
+                out.push_back({k, t, 0, line, c0}); continue;
             }
-            die(std::string("unexpected character '") + c + "'");
+            // Name the rule, not just the byte. Each of these is a decision
+            // somebody made about the language, and hitting it is the moment
+            // that decision becomes worth explaining.
+            if (c == ';')
+                die("unexpected character ';'",
+                    "statements are not terminated in Loophole -- one ends where "
+                    "its line does. Delete the ';'.");
+            if ((unsigned char)c >= 0x80)
+                die("this file is not ASCII",
+                    "all concrete syntax is ASCII (spec §3): write `all` for a "
+                    "universal, `<=` for at most, `not`/`and`/`or` for logic. "
+                    "Mathematical symbols are deliberately not accepted -- they "
+                    "are awkward to type.");
+            if (c == '/' || c == '*')
+                die(std::string("unexpected character '") + c + "'",
+                    "comments begin with '#' and run to the end of the line.");
+            if (c == '[' || c == ']')
+                die(std::string("unexpected character '") + c + "'",
+                    "a set is written with braces: `define everyone := { alice }`.");
+            die(std::string("unexpected character '") + c + "'",
+                "both languages are ASCII, and every construct is listed in "
+                "spec §3.");
         }
-        out.push_back({Tok::End, "", 0, line});
+        out.push_back({Tok::End, "", 0, line, col()});
         return out;
     }
 };
@@ -653,10 +792,16 @@ struct Parser {
     explicit Parser(std::vector<Token> toks) : t(std::move(toks)) {}
 
     const Token& cur() { return t[p]; }
-    [[noreturn]] void die(const std::string& msg) {
-        std::cerr << "parse error (line " << cur().line << "): " << msg
-                  << " (got '" << cur().text << "')\n";
-        std::exit(1);
+    [[noreturn]] void die(const std::string& msg, const std::string& help = "") {
+        fail(msg + " (found '" + (cur().kind == Tok::End ? "end of file" : cur().text) + "')",
+             cur().line, cur().col, help);
+    }
+    // For a token already consumed. `die` points at `cur()`, which by the time a
+    // value has been validated is the NEXT token -- the caret would land one
+    // past the thing being complained about.
+    [[noreturn]] void dieAt(const Token& t, const std::string& msg,
+                            const std::string& help = "") {
+        fail(msg, t.line, t.col, help);
     }
     Token eat(Tok k, const std::string& what) {
         if (cur().kind != k) die("expected " + what);
@@ -669,7 +814,11 @@ struct Parser {
         Token n = eat(Tok::Int, "bit width");
         eat(Tok::Gt, "'>'");
         int w = (int)n.num;
-        if (w < 1 || w > 64) die("bit width must be 1..64");
+        if (w < 1 || w > 64)
+            dieAt(n, "bit width " + n.text + " is out of range",
+                "a value is held in a register of 1 to 64 bits (spec §4.1). "
+                "A width outside that is a compile error, not an exploit -- "
+                "the joke lives in what a LEGAL width does, not in an illegal one.");
         return w;
     }
 
@@ -1069,8 +1218,17 @@ static bool resolvePlan(const Wish& w, const World& w0,
         int op = opByKeyword(verb);
         if (op < 0) {
             if (reason) {
+                // Candidates come from the operations table and from whatever
+                // the program has defined, so a new operation starts being
+                // suggested the moment it is added to OPS — nothing here lists
+                // the verbs by hand.
+                std::vector<std::string> cands;
+                for (const auto& o : OPS) cands.push_back(o.keyword);
+                for (const auto& kv : defs) cands.push_back(kv.first);
+                std::string near = didYouMean(verb, cands);
                 *reason = "unknown operation '" + st.verb + "' (line "
-                          + std::to_string(st.line) + ")";
+                          + std::to_string(st.line) + ")"
+                          + (near.empty() ? "" : " — did you mean '" + near + "'?");
             }
             return false;
         }
@@ -1344,10 +1502,16 @@ struct PolicyParser {
     explicit PolicyParser(std::vector<Token> toks) : t(std::move(toks)) {}
 
     const Token& cur() { return t[p]; }
-    [[noreturn]] void die(const std::string& msg) {
-        std::cerr << "genie error (line " << cur().line << "): " << msg
-                  << " (got '" << cur().text << "')\n";
-        std::exit(1);
+    [[noreturn]] void die(const std::string& msg, const std::string& help = "") {
+        fail(msg + " (found '" + (cur().kind == Tok::End ? "end of file" : cur().text) + "')",
+             cur().line, cur().col, help);
+    }
+    // For a token already consumed. `die` points at `cur()`, which by the time a
+    // value has been validated is the NEXT token -- the caret would land one
+    // past the thing being complained about.
+    [[noreturn]] void dieAt(const Token& t, const std::string& msg,
+                            const std::string& help = "") {
+        fail(msg, t.line, t.col, help);
     }
     Token eat(Tok k, const std::string& what) {
         if (cur().kind != k) die("expected " + what);
@@ -1499,10 +1663,15 @@ struct PolicyParser {
                 while (cur().kind != Tok::RBrace) {
                     if (word("layer")) {
                         p++;
+                        Token lt = cur();
                         std::string l = name("surface or ast");
                         if      (l == "surface")  r.layer = Layer::Surface;
                         else if (l == "ast")      r.layer = Layer::Ast;
-                        else die("unknown layer '" + l + "'");
+                        else dieAt(lt, "unknown layer '" + l + "'",
+                                 "there are two layers, because there are two "
+                                 "programs: `surface` reads the text submitted, "
+                                 "`ast` reads the program that will run. The "
+                                 "difference between them is the aliasing axis.");
                     } else if (word("forbid")) {
                         p++;
                         for (;;) {
@@ -2288,6 +2457,10 @@ int main(int argc, char** argv) {
     if (!f) { std::cerr << "cannot open " << path << "\n"; return 2; }
     std::stringstream ss; ss << f.rdbuf();
 
+    // Point the diagnostics at whichever file is being read right now. Two
+    // languages are parsed in this function and an error in either must quote
+    // its own source, so the slot is reassigned rather than set once.
+    g_src = { path, ss.str() };
     Program prog = Parser(Lexer(ss.str()).run()).parse();
 
     Genie genie;
@@ -2295,10 +2468,13 @@ int main(int argc, char** argv) {
         std::ifstream gf(genie_path);
         if (!gf) { std::cerr << "cannot open " << genie_path << "\n"; return 2; }
         std::stringstream gs; gs << gf.rdbuf();
+        g_src = { genie_path, gs.str() };
         genie = loadGenie(gs.str());
     } else {
+        g_src = { "(built-in genie)", DEFAULT_GENIE };
         genie = loadGenie(DEFAULT_GENIE);
     }
+    g_src = { path, ss.str() };      // back to the wish, for anything later
 
     World world;
     for (const auto& d : prog.decls) {
