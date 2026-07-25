@@ -1,0 +1,52 @@
+name: Pages
+
+# The playground is rebuilt from source on every push, never committed. A
+# checked-in .wasm would be a second copy of the compiler that nothing verifies,
+# and it would go stale the first time anyone forgot to rebuild it.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+          actions-cache-folder: emsdk-cache
+
+      - name: Build both, and check they agree
+        # The page must not ship a compiler that judges differently from the
+        # one the specification describes, so the same comparison CI runs is a
+        # precondition for publishing rather than a separate opinion about it.
+        run: |
+          make
+          make wasm
+          make wasm-check
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+  deploy:
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

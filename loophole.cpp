@@ -66,7 +66,7 @@
 // whichever language grew it. Dependants (an editor plugin, a judge) pin
 // against these.
 // ---------------------------------------------------------------------------
-static const char* COMPILER_VERSION = "1.4.0";
+static const char* COMPILER_VERSION = "1.5.0";
 static const char* WISH_VERSION     = "1.0";
 static const char* GENIE_VERSION    = "1.0";
 
@@ -118,7 +118,14 @@ struct Fatal { int code; };
 // Colour only when a human is looking. Escape codes in a pipe would end up in
 // the goldens, in `grep`, and in anything that treats the report as text — so
 // the check is on the actual stream, not on a flag.
+//
+// A host may override it. The browser has no terminal for `isatty` to be right
+// or wrong about, and what it answers there is an implementation detail of the
+// runtime — so the page states what it wants instead of letting the answer
+// depend on how the module happened to be loaded.
+static int g_colour = -1;                    // -1 decide; 0 never; 1 always
 static bool colourOK() {
+    if (g_colour >= 0) return g_colour != 0;
     static const bool on = !std::getenv("NO_COLOR") && isatty(fileno(stderr));
     return on;
 }
@@ -2772,3 +2779,92 @@ int main(int argc, char** argv) {
         return f.code;
     }
 }
+
+// ---------------------------------------------------------------------------
+// The browser.
+//
+// This entry point does NOT reimplement a run. It writes the two sources into
+// Emscripten's in-memory filesystem and calls the very same `cliMain` the
+// terminal calls, capturing the streams. A separate judging path is the one
+// thing the browser build must not have: §9.3 requires two conforming
+// implementations to agree verbatim, so a playground that judged by its own
+// route would be a second implementation waiting to drift from the first.
+//
+// `ci/wasm-check.sh` is what holds that claim up, and it compares the two
+// builds against each other rather than against a golden.
+// ---------------------------------------------------------------------------
+#ifdef __EMSCRIPTEN__
+#include <emscripten/bind.h>
+
+struct Judged {
+    int code = 0;
+    std::string output;
+};
+
+static Judged judgeSource(const std::string& wish, const std::string& genie,
+                          bool hunt, bool colour, int maxStmts, int maxWishes) {
+    g_colour = colour ? 1 : 0;
+    // The names the page shows. They are what a diagnostic will quote, so they
+    // have to read like something the person wrote -- "/in.wish" is a detail of
+    // the in-memory filesystem and means nothing to anyone looking at the page.
+    static const char* WISH_PATH  = "playground.wish";
+    static const char* GENIE_PATH = "playground.genie";
+
+    auto put = [](const char* path, const std::string& text) {
+        std::ofstream f(path, std::ios::trunc);
+        f << text;
+    };
+    put(WISH_PATH, wish);
+    const bool useGenie = !genie.empty();
+    if (useGenie) put(GENIE_PATH, genie);
+
+    // The search bounds are the page's to choose, and it wants smaller ones
+    // than the command line's defaults. On the standard world, stmts=2 wishes=4
+    // finds the same seven shapes as stmts=3 in 0.4s instead of 19 — fifty
+    // times faster for nothing given up. A playground whose headline button
+    // takes half a minute on the first press is a playground nobody presses
+    // twice.
+    std::string ms = std::to_string(maxStmts), mw = std::to_string(maxWishes);
+    std::vector<const char*> argv{ "loophole" };
+    if (hunt) {
+        argv.push_back("--hunt");
+        if (maxStmts  > 0) { argv.push_back("--max-stmts");  argv.push_back(ms.c_str()); }
+        if (maxWishes > 0) { argv.push_back("--max-wishes"); argv.push_back(mw.c_str()); }
+    }
+    if (useGenie) { argv.push_back("--genie"); argv.push_back(GENIE_PATH); }
+    argv.push_back(WISH_PATH);
+
+    // One buffer for both streams, so the page shows what a terminal would.
+    // cout is flushed wherever the order matters -- the one place a diagnostic
+    // interrupts a report already flushes before throwing.
+    std::ostringstream cap;
+    std::streambuf* o = std::cout.rdbuf(cap.rdbuf());
+    std::streambuf* e = std::cerr.rdbuf(cap.rdbuf());
+
+    Judged r;
+    try {
+        r.code = cliMain((int)argv.size(), const_cast<char**>(argv.data()));
+    } catch (const Fatal& f) {
+        r.code = f.code;
+    }
+    std::cout.flush();
+    std::cout.rdbuf(o);
+    std::cerr.rdbuf(e);
+    r.output = cap.str();
+    return r;
+}
+
+static std::string defaultGenie() { return DEFAULT_GENIE; }
+static std::string versions() {
+    return std::string(COMPILER_VERSION) + "|" + WISH_VERSION + "|" + GENIE_VERSION;
+}
+
+EMSCRIPTEN_BINDINGS(loophole) {
+    emscripten::value_object<Judged>("Judged")
+        .field("code", &Judged::code)
+        .field("output", &Judged::output);
+    emscripten::function("judge", &judgeSource);
+    emscripten::function("defaultGenie", &defaultGenie);
+    emscripten::function("versions", &versions);
+}
+#endif

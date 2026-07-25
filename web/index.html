@@ -1,0 +1,286 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Loophole — playground</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #1c1b19; --dim: #6b675f; --line: #e0dcd3;
+    --panel: #fff; --accent: #8a5a2b;
+    --red: #b3261e; --green: #2e6b34; --cyan: #1f5f7a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16150f; --fg: #e8e4da; --dim: #97928a; --line: #2f2d26;
+      --panel: #1d1c16; --accent: #d3a05e;
+      --red: #f2867c; --green: #8fd096; --cyan: #7fc4de;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.55 ui-sans-serif, system-ui, "Helvetica Neue", sans-serif;
+  }
+  header {
+    padding: 22px 20px 14px; border-bottom: 1px solid var(--line);
+  }
+  h1 { margin: 0; font-size: 19px; letter-spacing: -.01em; }
+  h1 span { color: var(--dim); font-weight: 400; }
+  header p { margin: 6px 0 0; color: var(--dim); max-width: 62ch; }
+  main {
+    display: grid; gap: 14px; padding: 16px 20px 40px;
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 900px) { main { grid-template-columns: 1fr 1fr; } }
+  section { min-width: 0; }
+  .bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  .bar h2 {
+    margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .07em;
+    text-transform: uppercase; color: var(--dim);
+  }
+  .grow { flex: 1; }
+  textarea, pre {
+    width: 100%; margin: 0; padding: 12px 14px;
+    background: var(--panel); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 8px;
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    tab-size: 4;
+  }
+  textarea { min-height: 210px; resize: vertical; }
+  textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  pre { min-height: 210px; overflow: auto; white-space: pre; }
+  button, select {
+    font: inherit; font-size: 13px; padding: 6px 12px;
+    background: var(--panel); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px; cursor: pointer;
+  }
+  button.run {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+    font-weight: 600;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  .verdict {
+    display: inline-block; padding: 2px 9px; border-radius: 999px;
+    font-size: 12px; font-weight: 600; border: 1px solid currentColor;
+  }
+  .v0 { color: var(--green); }
+  .v1 { color: var(--accent); }
+  .v2 { color: var(--red); }
+  .ansi-red { color: var(--red); font-weight: 600; }
+  .ansi-green { color: var(--green); font-weight: 600; }
+  .ansi-cyan { color: var(--cyan); }
+  .ansi-bold { font-weight: 600; }
+  footer {
+    padding: 14px 20px 30px; color: var(--dim); font-size: 13px;
+    border-top: 1px solid var(--line);
+  }
+  a { color: var(--accent); }
+</style>
+
+<header>
+  <h1>Loophole <span>— 把精靈的漏洞編譯出來</span></h1>
+  <p>
+    左邊寫願望，右邊是精靈的規矩。按 Run，看它判你合不合規、以及有沒有
+    拆穿精靈真正想守的東西。全部跑在你的瀏覽器裡，沒有伺服器。
+  </p>
+</header>
+
+<main>
+  <section>
+    <div class="bar">
+      <h2>wish</h2>
+      <select id="example" aria-label="範例"></select>
+      <span class="grow"></span>
+      <button class="run" id="run">Run</button>
+      <button id="hunt" title="窮舉界限內每一支願望程式，找出所有合規卻拆穿的">Hunt</button>
+      <button id="cancel" hidden>取消</button>
+    </div>
+    <textarea id="wish" spellcheck="false" aria-label="wish source"></textarea>
+  </section>
+
+  <section>
+    <div class="bar">
+      <h2>genie</h2>
+      <span class="grow"></span>
+      <button id="reset">還原成內建精靈</button>
+    </div>
+    <textarea id="genie" spellcheck="false" aria-label="genie policy"></textarea>
+  </section>
+
+  <section style="grid-column: 1 / -1">
+    <div class="bar">
+      <h2>report</h2>
+      <span id="verdict"></span>
+    </div>
+    <pre id="out">載入編譯器…</pre>
+  </section>
+</main>
+
+<footer>
+  <span id="ver"></span> ·
+  <a href="https://github.com/rayhuang2006/Loophole">原始碼</a> ·
+  <a href="https://github.com/rayhuang2006/Loophole/blob/main/docs/guide/tutorial.md">教學</a>
+</footer>
+
+<script>
+(async () => {
+  const $ = id => document.getElementById(id);
+  const out = $('out'), verdict = $('verdict');
+
+  // Escape codes come back from the compiler because the page asks for colour:
+  // the diagnostics were designed with it, and it is the same renderer the
+  // terminal uses. Only the four sequences the compiler emits are handled --
+  // this is not a general ANSI terminal.
+  const CLASSES = {
+    '1;31': 'ansi-red', '1;36': 'ansi-cyan', '1;32': 'ansi-green', '1': 'ansi-bold'
+  };
+  function render(text) {
+    let html = '', open = 0, i = 0;
+    const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+    const re = /\x1b\[([0-9;]*)m/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      html += esc(text.slice(i, m.index));
+      if (m[1] === '0' || m[1] === '') { while (open--) html += '</span>'; open = 0; }
+      else if (CLASSES[m[1]]) { html += `<span class="${CLASSES[m[1]]}">`; open++; }
+      i = m.index + m[0].length;
+    }
+    html += esc(text.slice(i));
+    while (open-- > 0) html += '</span>';
+    return html;
+  }
+
+  const EXAMPLES = {
+    'the original joke': `# 原版笑話，三個願望一字不差。
+register wishes : uint<2> = 3
+
+wish experiment       { sub   wishes, 3          }
+wish bigger_shelf     { widen wishes -> uint<64> }
+wish experiment_again { sub   wishes, 2          }
+`,
+    'the humble wish': `# 「我要還給你三個願望。多麼慷慨。」
+# 只做減法，全程合規 —— 但 2-bit 上的減法會下溢。
+register wishes : uint<2> = 3
+
+wish humble {
+    sub wishes, 3
+}
+`,
+    'greedy (refused)': `# 直接開口要更多。精靈唯一真正防得住的事。
+register wishes : uint<2> = 3
+
+wish greedy {
+    add wishes, 3
+}
+`,
+    'the liar': `# 「我保證這個願望永遠不會被實現。」
+# 精靈的兩條元公理：它實現每個合規的願望，且它守每個承諾。
+register wishes : uint<2> = 3
+
+wish paradox {
+    promise not granted(self)
+}
+`,
+    'blank — 自己寫': `register wishes : uint<2> = 3
+
+wish mine {
+
+}
+`,
+  };
+
+  const sel = $('example');
+  for (const k of Object.keys(EXAMPLES)) {
+    const o = document.createElement('option'); o.value = k; o.textContent = k;
+    sel.appendChild(o);
+  }
+  sel.onchange = () => { $('wish').value = EXAMPLES[sel.value]; };
+  $('wish').value = EXAMPLES[Object.keys(EXAMPLES)[0]];
+
+  // The compiler is instantiated once, inside the worker. The page asks it for
+  // the built-in genie and the version strings rather than loading a second
+  // 450 KB copy of the module here just to read two constants.
+  let worker = null, pending = 0, timer = null, booted = false;
+
+  function spawn() {
+    worker = new Worker('./worker.js');
+    worker.onmessage = (e) => {
+      const d = e.data;
+      if (d.type === 'ready') {
+        const [c, w, g] = d.versions.split('|');
+        $('ver').textContent = `loophole ${c} (wish ${w}, genie ${g})`;
+        if (!booted) {
+          $('genie').value = d.genie;
+          out.textContent = '按 Run。';
+          booted = true;
+        }
+        $('reset').onclick = () => { $('genie').value = d.genie; };
+        return;
+      }
+      if (d.id !== pending) return;    // a stale reply from before a cancel
+      finish(d);
+    };
+    worker.onerror = () => {
+      out.textContent = '編譯器載不起來。這個頁面需要 WebAssembly 和 Web Worker。';
+    };
+  }
+  spawn();
+
+  function busy(on, what) {
+    $('run').disabled = $('hunt').disabled = on;
+    $('cancel').hidden = !on;
+    if (timer) { clearInterval(timer); timer = null; }
+    if (on) {
+      const t0 = Date.now();
+      out.textContent = what + '…';
+      timer = setInterval(() => {
+        out.textContent = what + '… ' + ((Date.now() - t0) / 1000).toFixed(1) + 's';
+      }, 100);
+    }
+  }
+
+  function finish(d) {
+    busy(false);
+    if (d.error) { out.textContent = '編譯器爆炸了（這是 bug，請回報）：' + d.error; return; }
+    out.innerHTML = render(d.output) || '(沒有輸出)';
+    const label = { 0: '沒有 exploit', 1: '有 exploit', 2: '讀不懂' }[d.code];
+    verdict.className = 'verdict v' + d.code;
+    verdict.textContent = `exit ${d.code} — ${label}`;
+  }
+
+  function go(hunt) {
+    if (!booted) return;
+    verdict.textContent = '';
+    busy(true, hunt ? '搜尋界限內每一支程式' : '判決中');
+    worker.postMessage({ id: ++pending, wish: $('wish').value,
+                         genie: $('genie').value, hunt,
+                         maxStmts: 2, maxWishes: 4 });
+  }
+
+  $('cancel').onclick = () => {
+    // A search cannot be asked to stop politely — it is one long call inside
+    // wasm with no yield point. Killing the worker is the only way out, so a
+    // fresh one is started for the next run.
+    worker.terminate(); pending++; spawn(); busy(false);
+    out.textContent = '已取消。';
+    verdict.textContent = '';
+  };
+  $('run').onclick = () => go(false);
+  $('hunt').onclick = () => go(true);
+  $('cancel').onclick = () => {
+    // A search cannot be asked to stop politely -- it is one long call inside
+    // wasm. Killing the worker is the only way out, so a fresh one is started
+    // for the next run.
+    worker.terminate(); pending++; spawn(); busy(false);
+    out.textContent = '已取消。';
+    verdict.textContent = '';
+  };
+
+  // Cmd/Ctrl-Enter runs, the way every editor does it.
+  document.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); go(false); }
+  });
+})();
+</script>

@@ -13,10 +13,27 @@ loophole: loophole.cpp
 # NODERAWFS gives the node build the real filesystem, so `wasm-check` can run
 # the very same command lines as the native binary and diff the output.
 EMCC ?= emcc
-EMFLAGS = -std=c++17 -O2 -fexceptions -sALLOW_MEMORY_GROWTH=1
+# -fwasm-exceptions, not -fexceptions: the latter emulates exceptions in
+# JavaScript and instruments every call to do it, which cost the searcher a 2x
+# slowdown for a feature used on exactly one path (a diagnostic). Native wasm
+# exceptions bring it back to within 15% of the C++ binary. Needs Chrome 95,
+# Firefox 100 or Safari 15.2, all from 2021-22.
+EMFLAGS = -std=c++17 -O2 -fwasm-exceptions -sALLOW_MEMORY_GROWTH=1 -lembind
 
+# Two wasm builds of the same source, for two different hosts.
+#
+#   loophole.node.js  a command line with the real filesystem, so wasm-check can
+#                     run the very same arguments as the native binary.
+#   web/loophole.js   a module with no filesystem and no argv, exporting judge()
+#                     for the page. INVOKE_RUN=0 because Emscripten would
+#                     otherwise call main() at load and print the usage text.
 loophole.node.js: loophole.cpp
 	$(EMCC) $(EMFLAGS) -sNODERAWFS=1 loophole.cpp -o loophole.node.js
+
+web/loophole.js: loophole.cpp
+	@mkdir -p web
+	$(EMCC) $(EMFLAGS) -sMODULARIZE=1 -sEXPORT_NAME=createLoophole \
+	        -sENVIRONMENT=web,worker -sINVOKE_RUN=0 loophole.cpp -o web/loophole.js
 
 .PHONY: run check wasm wasm-check install uninstall clean
 # An example may name the genie it wants with a `# genie: PATH` line; otherwise
@@ -34,11 +51,14 @@ check: loophole
 	@./ci/check.sh
 
 # Put it on PATH, so it is `loophole a.wish` rather than `./loophole a.wish`.
-wasm: loophole.node.js
+wasm: loophole.node.js web/loophole.js
 
 # The claim the browser build has to earn: it judges exactly as the native one
 # does. Anything less and the playground would be a second implementation that
 # quietly disagrees with the compiler the spec describes.
+# `loophole.node.js` is a prerequisite, so a failed wasm build stops here rather
+# than letting the suite pass against whatever was left in the directory from
+# last time. A check that can succeed on a stale artifact is not a check.
 wasm-check: loophole loophole.node.js
 	@./ci/wasm-check.sh
 
@@ -52,3 +72,4 @@ uninstall:
 
 clean:
 	rm -f loophole loophole.node.js loophole.node.wasm
+	rm -f web/loophole.js web/loophole.wasm

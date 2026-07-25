@@ -6,6 +6,34 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.5.0 — wish 1.0, genie 1.0
+
+**There is a playground.** A static page, no server: the compiler is the same
+one, built to WebAssembly, running in the reader's own browser. Write a wish on
+the left, edit the genie on the right, press Run. `make wasm-check` is a
+precondition for publishing it, so the page cannot ship a compiler that judges
+differently from the one the specification describes.
+
+Three things had to be measured rather than guessed:
+
+- **`--hunt` froze the tab.** It is one long call into wasm with no yield point,
+  and the default bounds take 19 seconds natively. It now runs in a Web Worker,
+  with an elapsed-time readout and a cancel button — cancelling means killing
+  the worker, because a search cannot be asked to stop politely.
+- **The page uses smaller search bounds than the command line.** On the standard
+  world, `--max-stmts 2 --max-wishes 4` finds the same seven shapes as the
+  default in **0.4s instead of 19** — including the empty one. Fifty times
+  faster for nothing given up.
+- **`-fexceptions` cost a 2x slowdown.** Emscripten emulates exceptions in
+  JavaScript by instrumenting every call, to support one path that is taken only
+  when a program fails to parse. `-fwasm-exceptions` brings the searcher back to
+  within 15% of the native binary and drops 85 KB off the module.
+
+Diagnostics keep their colour: the page asks the compiler for it and renders the
+escape sequences as spans. Whether a terminal exists is now something the host
+states rather than something `isatty` guesses at, since under wasm its answer is
+an implementation detail of the runtime.
+
 ## loophole 1.4.0 — wish 1.0, genie 1.0
 
 **The compiler builds for the browser**, as a step toward a playground: nobody

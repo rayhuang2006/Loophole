@@ -58,7 +58,10 @@ wish experiment_again
 
 ## 跑跑看
 
-下載編好的（[Releases](https://github.com/rayhuang2006/Loophole/releases)，Linux 和 macOS）：
+**最快的方式是[線上試](https://rayhuang2006.github.io/Loophole/)** —— 不用裝任何東西，
+編譯器跑在你的瀏覽器裡，沒有伺服器。
+
+或者下載編好的（[Releases](https://github.com/rayhuang2006/Loophole/releases)，Linux 和 macOS）：
 
 ```bash
 curl -L -o loophole https://github.com/rayhuang2006/Loophole/releases/latest/download/loophole-macos-arm64
@@ -185,12 +188,12 @@ wish tidy
 
 ```bash
 ./loophole --json examples/01_humble.wish     # 機器可讀的判決
-./loophole --version                          # loophole 1.4.0  (wish 1.0, genie 1.0)
+./loophole --version                          # loophole 1.5.0  (wish 1.0, genie 1.0)
 ```
 
 ```json
 {
-  "loophole": "1.4.0",
+  "loophole": "1.5.0",
   "languages": { "wish": "1.0", "genie": "1.0" },
   "wishes": [
     { "wish": "humble", "legal": true,
@@ -245,6 +248,8 @@ wish tidy
 - **v1.0.0 發布** LICENSE、版本號、機器可讀輸出、離開碼契約、CI。**done**
 - **v1.1.0** 更名為 `loophole`、兩種語言各自編版本、`make install`、砍掉不存在的 `grounded` 層。**done**
 - **v1.2.0** 報告重寫：照精靈實際的動作順序排，規則和不變量不再長得一樣。**done**
+- **v1.3.0** 診斷重寫：rustc 風格的箭頭與 help，順便修掉兩個離開碼契約的 bug。**done**
+- **v1.5.0** [瀏覽器 playground](https://rayhuang2006.github.io/Loophole/)：同一個編譯器編成 wasm，CI 驗證兩邊判決逐字相同。**done**
 - **接下來** VSCode 語法高亮（`.wish` 和 `.genie` 各一份文法）、瀏覽器 playground、解題站。
 
 現在的語言認得 `register` / `attribute` / `people` / `wish` / `define` / `promise`，
