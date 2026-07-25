@@ -66,7 +66,7 @@
 // whichever language grew it. Dependants (an editor plugin, a judge) pin
 // against these.
 // ---------------------------------------------------------------------------
-static const char* COMPILER_VERSION = "1.5.0";
+static const char* COMPILER_VERSION = "1.6.0";
 static const char* WISH_VERSION     = "1.0";
 static const char* GENIE_VERSION    = "1.0";
 
@@ -2798,7 +2798,8 @@ int main(int argc, char** argv) {
 
 struct Judged {
     int code = 0;
-    std::string output;
+    std::string output;    // the prose report, for a person to read
+    std::string json;      // the same judgment, for the lessons to grade
 };
 
 static Judged judgeSource(const std::string& wish, const std::string& genie,
@@ -2851,6 +2852,29 @@ static Judged judgeSource(const std::string& wish, const std::string& genie,
     std::cout.rdbuf(o);
     std::cerr.rdbuf(e);
     r.output = cap.str();
+
+    // The lessons grade with --json, never by matching the report. §10.1 says
+    // the prose is not the contract and may be reworded freely -- and CI has
+    // already been broken once by a check that read it, so a lesson that did
+    // the same would start failing the day someone improved a sentence.
+    //
+    // Judging twice is a millisecond and cannot disagree with itself: §9.3
+    // makes the verdict a pure function of the source. Not for --hunt, which
+    // has no JSON form and is the one slow path.
+    if (!hunt) {
+        std::vector<const char*> jargv{ "loophole", "--json" };
+        if (useGenie) { jargv.push_back("--genie"); jargv.push_back(GENIE_PATH); }
+        jargv.push_back(WISH_PATH);
+        std::ostringstream jcap;
+        std::streambuf* jo = std::cout.rdbuf(jcap.rdbuf());
+        std::streambuf* je = std::cerr.rdbuf(jcap.rdbuf());
+        try { cliMain((int)jargv.size(), const_cast<char**>(jargv.data())); }
+        catch (const Fatal&) { }
+        std::cout.flush();
+        std::cout.rdbuf(jo);
+        std::cerr.rdbuf(je);
+        if (r.code != 2) r.json = jcap.str();
+    }
     return r;
 }
 
@@ -2862,7 +2886,8 @@ static std::string versions() {
 EMSCRIPTEN_BINDINGS(loophole) {
     emscripten::value_object<Judged>("Judged")
         .field("code", &Judged::code)
-        .field("output", &Judged::output);
+        .field("output", &Judged::output)
+        .field("json", &Judged::json);
     emscripten::function("judge", &judgeSource);
     emscripten::function("defaultGenie", &defaultGenie);
     emscripten::function("versions", &versions);

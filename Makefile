@@ -33,7 +33,7 @@ loophole.node.js: loophole.cpp
 web/loophole.js: loophole.cpp
 	@mkdir -p web
 	$(EMCC) $(EMFLAGS) -sMODULARIZE=1 -sEXPORT_NAME=createLoophole \
-	        -sENVIRONMENT=web,worker -sINVOKE_RUN=0 loophole.cpp -o web/loophole.js
+	        -sENVIRONMENT=web,worker,node -sINVOKE_RUN=0 loophole.cpp -o web/loophole.js
 
 .PHONY: run check wasm wasm-check install uninstall clean
 # An example may name the genie it wants with a `# genie: PATH` line; otherwise
@@ -59,8 +59,9 @@ wasm: loophole.node.js web/loophole.js
 # `loophole.node.js` is a prerequisite, so a failed wasm build stops here rather
 # than letting the suite pass against whatever was left in the directory from
 # last time. A check that can succeed on a stale artifact is not a check.
-wasm-check: loophole loophole.node.js
+wasm-check: loophole loophole.node.js web/loophole.js
 	@./ci/wasm-check.sh
+	@node ci/lessons-check.mjs
 
 install: loophole
 	@mkdir -p $(DESTDIR)$(BINDIR)

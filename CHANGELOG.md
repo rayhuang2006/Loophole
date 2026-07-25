@@ -6,6 +6,40 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.6.0 — wish 1.0, genie 1.0
+
+**Eleven lessons.** The playground had nothing to do in it: a language nobody
+knows, an empty editor, and a Run button. The guide in `docs/guide/` teaches the
+same material, but reading is not how anyone learned this — the author included,
+who got fluent by editing one line of a file and running it.
+
+The order is the one concepts depend on, not the one the guide is written in.
+Lessons 5–7 are a single arc: you write a rule that blocks your own exploit, you
+alias your way past it, and then you fix your own genie by moving one word.
+
+**The compiler is the marker.** No lesson checks what you typed; each one asks
+the genie whether you got away with it. Grading by matching an expected answer
+would quietly deny the thing the project exists to claim — that the exploits are
+consequences of the semantics rather than things the author planted.
+
+- Marking reads `--json`, never the report. §10.1 says the prose is not the
+  contract, and CI has already been broken once by a check that read it; a
+  lesson doing the same would start failing the day someone improved a sentence.
+- The browser entry now returns the JSON verdict alongside the prose. It judges
+  twice to do it, which is a millisecond and cannot disagree with itself: §9.3
+  makes the verdict a pure function of the source.
+- **`ci/lessons-check.mjs` runs every lesson twice**: the shipped starting file
+  must NOT satisfy the goal, and the intended answer MUST. Both failures are
+  silent otherwise — a goal nobody can reach, or a lesson that congratulates you
+  for pressing Run.
+- The worker is never cached. A stale one paired with a newer page reads as a
+  logic error rather than a caching one: the page asks for a field the old
+  worker does not send, so every lesson silently reports "not solved". That
+  happened during development, and it cost twenty minutes.
+
+Progress is kept per lesson in `localStorage`; the lesson text never is, so
+rewriting a lesson reaches people who already passed it.
+
 ## loophole 1.5.0 — wish 1.0, genie 1.0
 
 **There is a playground.** A static page, no server: the compiler is the same

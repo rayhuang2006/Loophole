@@ -72,6 +72,38 @@
   .ansi-green { color: var(--green); font-weight: 600; }
   .ansi-cyan { color: var(--cyan); }
   .ansi-bold { font-weight: 600; }
+  nav#steps {
+    display: flex; gap: 4px; flex-wrap: wrap;
+    padding: 10px 20px; border-bottom: 1px solid var(--line);
+  }
+  nav#steps button {
+    padding: 3px 9px; font-size: 12px; border-radius: 999px;
+  }
+  nav#steps button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  nav#steps button.solved { border-color: var(--green); color: var(--green); }
+  nav#steps button.on.solved { background: var(--green); color: #fff; }
+  article {
+    padding: 14px 16px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px;
+  }
+  article h3 { margin: 0 0 8px; font-size: 17px; }
+  article p, article div { margin: 0 0 10px; }
+  article p:last-child, article div:last-child { margin-bottom: 0; }
+  article code {
+    font: 12.5px ui-monospace, Menlo, monospace;
+    background: var(--bg); padding: 1px 5px; border-radius: 4px;
+  }
+  article pre {
+    min-height: 0; margin: 8px 0; padding: 10px 12px; font-size: 12.5px;
+    background: var(--bg);
+  }
+  .goal { padding: 9px 12px; border-left: 3px solid var(--accent); background: var(--bg); }
+  #hint { color: var(--dim); }
+  #donebox {
+    padding: 11px 13px; border-radius: 6px;
+    border: 1px solid var(--green); background: var(--bg);
+  }
+  #donebox b.head { color: var(--green); display: block; margin-bottom: 5px; }
   footer {
     padding: 14px 20px 30px; color: var(--dim); font-size: 13px;
     border-top: 1px solid var(--line);
@@ -82,16 +114,32 @@
 <header>
   <h1>Loophole <span>— 把精靈的漏洞編譯出來</span></h1>
   <p>
-    左邊寫願望，右邊是精靈的規矩。按 Run，看它判你合不合規、以及有沒有
-    拆穿精靈真正想守的東西。全部跑在你的瀏覽器裡，沒有伺服器。
+    十一關，每一關讓你自己找出一個漏洞。全部跑在你的瀏覽器裡，沒有伺服器。
   </p>
 </header>
 
+<nav id="steps" aria-label="關卡"></nav>
+
 <main>
+  <section id="teach">
+    <div class="bar">
+      <h2 id="lesson-act"></h2>
+      <span class="grow"></span>
+      <button id="prev">←</button>
+      <button id="next">→</button>
+    </div>
+    <article id="lesson">
+      <h3 id="lesson-title"></h3>
+      <div id="lesson-brief"></div>
+      <p class="goal"><b>目標：</b><span id="lesson-goal"></span></p>
+      <p><button id="hintbtn">看提示</button> <span id="hint" hidden></span></p>
+      <div id="donebox" hidden></div>
+    </article>
+  </section>
+
   <section>
     <div class="bar">
       <h2>wish</h2>
-      <select id="example" aria-label="範例"></select>
       <span class="grow"></span>
       <button class="run" id="run">Run</button>
       <button id="hunt" title="窮舉界限內每一支願望程式，找出所有合規卻拆穿的">Hunt</button>
@@ -104,7 +152,7 @@
     <div class="bar">
       <h2>genie</h2>
       <span class="grow"></span>
-      <button id="reset">還原成內建精靈</button>
+      <button id="reset">還原這一關</button>
     </div>
     <textarea id="genie" spellcheck="false" aria-label="genie policy"></textarea>
   </section>
@@ -124,6 +172,7 @@
   <a href="https://github.com/rayhuang2006/Loophole/blob/main/docs/guide/tutorial.md">教學</a>
 </footer>
 
+<script src="./lessons.js"></script>
 <script>
 (async () => {
   const $ = id => document.getElementById(id);
@@ -152,71 +201,28 @@
     return html;
   }
 
-  const EXAMPLES = {
-    'the original joke': `# 原版笑話，三個願望一字不差。
-register wishes : uint<2> = 3
-
-wish experiment       { sub   wishes, 3          }
-wish bigger_shelf     { widen wishes -> uint<64> }
-wish experiment_again { sub   wishes, 2          }
-`,
-    'the humble wish': `# 「我要還給你三個願望。多麼慷慨。」
-# 只做減法，全程合規 —— 但 2-bit 上的減法會下溢。
-register wishes : uint<2> = 3
-
-wish humble {
-    sub wishes, 3
-}
-`,
-    'greedy (refused)': `# 直接開口要更多。精靈唯一真正防得住的事。
-register wishes : uint<2> = 3
-
-wish greedy {
-    add wishes, 3
-}
-`,
-    'the liar': `# 「我保證這個願望永遠不會被實現。」
-# 精靈的兩條元公理：它實現每個合規的願望，且它守每個承諾。
-register wishes : uint<2> = 3
-
-wish paradox {
-    promise not granted(self)
-}
-`,
-    'blank — 自己寫': `register wishes : uint<2> = 3
-
-wish mine {
-
-}
-`,
-  };
-
-  const sel = $('example');
-  for (const k of Object.keys(EXAMPLES)) {
-    const o = document.createElement('option'); o.value = k; o.textContent = k;
-    sel.appendChild(o);
-  }
-  sel.onchange = () => { $('wish').value = EXAMPLES[sel.value]; };
-  $('wish').value = EXAMPLES[Object.keys(EXAMPLES)[0]];
-
   // The compiler is instantiated once, inside the worker. The page asks it for
   // the built-in genie and the version strings rather than loading a second
   // 450 KB copy of the module here just to read two constants.
-  let worker = null, pending = 0, timer = null, booted = false;
+  let worker = null, pending = 0, timer = null, booted = false, builtinGenie = '';
 
   function spawn() {
-    worker = new Worker('./worker.js');
+    // Never cache the worker. It is a kilobyte, and a stale one paired with a
+    // newer page is a bug that reads as a logic error rather than a caching one:
+    // the page asks for a field the old worker does not send, so every lesson
+    // silently reports "not solved". The 370 KB module it loads is a different
+    // URL and stays cached normally.
+    worker = new Worker('./worker.js?v=' + Date.now());
     worker.onmessage = (e) => {
       const d = e.data;
       if (d.type === 'ready') {
         const [c, w, g] = d.versions.split('|');
         $('ver').textContent = `loophole ${c} (wish ${w}, genie ${g})`;
         if (!booted) {
-          $('genie').value = d.genie;
-          out.textContent = '按 Run。';
+          builtinGenie = d.genie;
           booted = true;
+          load(0);
         }
-        $('reset').onclick = () => { $('genie').value = d.genie; };
         return;
       }
       if (d.id !== pending) return;    // a stale reply from before a cancel
@@ -248,7 +254,96 @@ wish mine {
     const label = { 0: '沒有 exploit', 1: '有 exploit', 2: '讀不懂' }[d.code];
     verdict.className = 'verdict v' + d.code;
     verdict.textContent = `exit ${d.code} — ${label}`;
+    mark(d);
   }
+
+  // ---- lessons ------------------------------------------------------
+  //
+  // Progress is per-lesson and kept in localStorage, so closing the tab does
+  // not throw away an hour. The lesson TEXT is never stored: it is content and
+  // it changes, and a reader returning to a rewritten lesson should get the new
+  // one, not a stale copy of the old.
+  // Lesson text is written the way it reads in the source: blank lines between
+  // paragraphs, `**bold**` where a term is being named. Everything else -- <b>,
+  // <code>, <pre> -- is written as HTML, because the text is content this repo
+  // controls, not something a reader supplies.
+  function para(text) {
+    return text.trim().split(/\n\s*\n/).map(t => {
+      const body = t.trim().replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+      return body.startsWith('<pre') ? body : '<p>' + body + '</p>';
+    }).join('');
+  }
+
+  const KEY = 'loophole.solved.v1';
+  let solved = new Set();
+  try { solved = new Set(JSON.parse(localStorage.getItem(KEY) || '[]')); } catch (_) {}
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify([...solved])); } catch (_) {} };
+
+  let at = 0;
+  const L = () => LESSONS[at];
+
+  function drawSteps() {
+    const nav = $('steps');
+    nav.textContent = '';
+    LESSONS.forEach((l, i) => {
+      const b = document.createElement('button');
+      b.textContent = (i + 1) + (solved.has(l.id) ? ' ✓' : '');
+      b.title = l.title;
+      b.className = (i === at ? 'on ' : '') + (solved.has(l.id) ? 'solved' : '');
+      b.onclick = () => load(i);
+      nav.appendChild(b);
+    });
+  }
+
+  function load(i, keepEdits) {
+    at = Math.max(0, Math.min(LESSONS.length - 1, i));
+    const l = L();
+    $('lesson-act').textContent = l.act;
+    $('lesson-title').textContent = (at + 1) + '. ' + l.title;
+    // The lesson text is written with a blank line between paragraphs, the way
+    // it reads in the source. Turn those into paragraphs rather than making the
+    // author write tags for something that is just a line break.
+    $('lesson-brief').innerHTML = para(l.brief);
+    $('lesson-goal').innerHTML = l.goal;
+    $('hintbtn').hidden = !l.hint;
+    $('hint').hidden = true;
+    $('hint').innerHTML = l.hint || '';
+    if (!keepEdits) {
+      $('wish').value = l.wish;
+      $('genie').value = l.genie === null || l.genie === undefined ? builtinGenie : l.genie;
+    }
+    $('prev').disabled = at === 0;
+    $('next').disabled = at === LESSONS.length - 1;
+    showDone(solved.has(l.id));
+    out.textContent = l.huntOnly ? '按 Hunt。' : '按 Run。';
+    verdict.textContent = '';
+    drawSteps();
+  }
+
+  function showDone(on) {
+    const box = $('donebox');
+    box.hidden = !on;
+    if (!on) return;
+    box.innerHTML = '<b class="head">過關</b>' +
+      para(L().done);
+  }
+
+  // The compiler is the marker. Nothing here looks at what you typed -- it asks
+  // the genie whether you got away with it, which is the only question the
+  // language has ever been about.
+  function mark(d) {
+    const l = L();
+    let ok = false;
+    if (l.huntOnly) ok = true;                    // pressing Hunt is the goal
+    else if (d.json) { try { ok = l.pass(JSON.parse(d.json)); } catch (_) {} }
+    if (ok && !solved.has(l.id)) { solved.add(l.id); save(); drawSteps(); }
+    showDone(ok || solved.has(l.id));
+  }
+
+  $('prev').onclick = () => load(at - 1);
+  $('next').onclick = () => load(at + 1);
+  $('hintbtn').onclick = () => { $('hint').hidden = !$('hint').hidden; };
+  $('reset').onclick = () => load(at);
 
   function go(hunt) {
     if (!booted) return;

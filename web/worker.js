@@ -18,7 +18,7 @@ self.onmessage = async (e) => {
   try {
     const M = await ready;
     const r = M.judge(wish, genie, hunt, true, maxStmts | 0, maxWishes | 0);
-    self.postMessage({ id, code: r.code, output: r.output });
+    self.postMessage({ id, code: r.code, output: r.output, json: r.json });
   } catch (err) {
     self.postMessage({ id, error: String(err) });
   }
