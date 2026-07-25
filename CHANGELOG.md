@@ -6,6 +6,18 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.8.2 — wish 1.0, genie 1.0
+
+- **A reading chapter showed two buttons that said the same thing.** Once read,
+  the "next chapter" at the foot of the text and the one in the seal below it
+  were both on screen, a few centimetres apart. The first is only shown before
+  the chapter has been read.
+- **The table of contents no longer opens at all.** Dropping the full table down
+  on hover put the same two rows back that collapsing it was meant to remove.
+  The readout on the left now names whichever tick the pointer is over —
+  `08 · 一、數字 · 減過頭` — so the contents are reachable one chapter at a time
+  and never occupy the page. The rail is a 35px hairline in every state.
+
 ## loophole 1.8.1 — wish 1.0, genie 1.0
 
 - **Passing a chapter offered no way onward.** The only route forward was a
