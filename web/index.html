@@ -71,10 +71,49 @@
   }
   .sub b { color: var(--ink); font-weight: 600; }
 
-  /* ---- contents rail ---------------------------------------------- */
-  #rail { border-bottom: 1px solid var(--rule); background: var(--sheet); }
-  #rail .wrap {
-    padding-top: 11px; padding-bottom: 11px;
+  /* ---- contents rail ----------------------------------------------
+     Collapsed to a single hairline of ticks. Twenty-eight numbered chapters
+     laid out in full took two rows and shouted louder than the chapter you
+     were reading. The full table of contents drops down on hover, and on
+     focus, so a keyboard can reach it too. */
+  #rail {
+    border-bottom: 1px solid var(--rule); background: var(--sheet);
+    outline: 0;
+  }
+  #rail .wrap { padding-top: 0; padding-bottom: 0; }
+  .railbar {
+    display: flex; align-items: center; gap: 16px;
+    height: 34px; cursor: pointer;
+  }
+  .railnow {
+    font: 500 11px/1 ui-monospace, Menlo, monospace; letter-spacing: .12em;
+    color: var(--ink-2); white-space: nowrap;
+  }
+  .railhint {
+    font: 500 10px/1 ui-monospace, Menlo, monospace; letter-spacing: .18em;
+    color: var(--ink-3); text-transform: uppercase; white-space: nowrap;
+    opacity: .7;
+  }
+  #rail:hover .railhint, #rail:focus-within .railhint { opacity: 0; }
+  .ticks { flex: 1; display: flex; gap: 2px; align-items: center; min-width: 0; }
+  .tick {
+    flex: 1; height: 3px; background: var(--rule); border: 0; padding: 0;
+    cursor: pointer; transition: height .12s, background .12s;
+  }
+  .tick.solved { background: var(--seal); }
+  .tick.on { height: 9px; background: var(--ink); }
+  .tick.on.solved { background: var(--seal); }
+  .tick.gap { flex: 0 0 9px; background: none; cursor: default; }
+
+  .railfull {
+    max-height: 0; overflow: hidden;
+    transition: max-height .18s ease, opacity .18s ease; opacity: 0;
+  }
+  #rail:hover .railfull, #rail:focus-within .railfull {
+    max-height: 220px; opacity: 1;
+  }
+  .railinner {
+    padding: 4px 0 14px;
     display: flex; gap: 26px; flex-wrap: wrap; align-items: baseline;
   }
   .actgrp { display: flex; align-items: baseline; gap: 9px; }
@@ -232,6 +271,13 @@
     text-transform: uppercase; color: var(--seal); margin-bottom: 10px;
   }
   #donebox p { margin: 0 0 11px; } #donebox p:last-child { margin-bottom: 0; }
+  .onward { margin-top: 15px; }
+  .onward button {
+    font: 500 12px/1 ui-monospace, Menlo, monospace; letter-spacing: .1em;
+    padding: 9px 18px; border: 1px solid var(--seal); background: var(--seal);
+    color: var(--paper); cursor: pointer;
+  }
+  .onward button:hover { filter: brightness(1.12); }
   #donebox .lead { border-left-color: var(--seal); }
   .readon {
     margin: 20px 0 0; padding-top: 14px; border-top: 2px solid var(--ink);
@@ -341,7 +387,16 @@
   </div>
 </header>
 
-<div id="rail"><div class="wrap"></div></div>
+<div id="rail" tabindex="0">
+  <div class="wrap">
+    <div class="railbar">
+      <span class="railnow"></span>
+      <div class="ticks" id="ticks"></div>
+      <span class="railhint">目錄</span>
+    </div>
+    <div class="railfull" id="railfull"></div>
+  </div>
+</div>
 
 <main>
   <div class="wrap">
@@ -564,10 +619,32 @@
   const L = () => LESSONS[at];
 
   function drawRail() {
-    const rail = $('rail').querySelector('.wrap');
-    rail.textContent = '';
+    const acts = [...new Set(LESSONS.map(l => l.act))];
+
+    // The collapsed line: one tick per chapter, a wider gap between acts.
+    const ticks = $('ticks');
+    ticks.textContent = '';
     let n = 0;
-    for (const act of [...new Set(LESSONS.map(l => l.act))]) {
+    acts.forEach((act, ai) => {
+      if (ai) { const g = document.createElement('span'); g.className = 'tick gap'; ticks.appendChild(g); }
+      for (const l of LESSONS.filter(x => x.act === act)) {
+        const i = n++;
+        const t = document.createElement('button');
+        t.className = 'tick' + (i === at ? ' on' : '') + (solved.has(l.id) ? ' solved' : '');
+        t.title = (i + 1) + '. ' + l.title;
+        t.onclick = e => { e.stopPropagation(); load(i); };
+        ticks.appendChild(t);
+      }
+    });
+    document.querySelector('.railnow').textContent =
+      L().act + ' · ' + String(at + 1).padStart(2, '0') + ' / ' + LESSONS.length;
+
+    // The full table, revealed on hover.
+    const full = $('railfull');
+    full.textContent = '';
+    const inner = document.createElement('div'); inner.className = 'railinner';
+    n = 0;
+    for (const act of acts) {
       const grp = document.createElement('div'); grp.className = 'actgrp';
       const nm = document.createElement('div'); nm.className = 'actname';
       nm.textContent = act;
@@ -582,8 +659,9 @@
         pills.appendChild(b);
       }
       grp.append(nm, pills);
-      rail.appendChild(grp);
+      inner.appendChild(grp);
     }
+    full.appendChild(inner);
   }
 
   function load(i) {
@@ -629,7 +707,18 @@
   function showDone(on) {
     const box = $('donebox');
     box.hidden = !on;
-    if (on) box.innerHTML = '<div class="head">✓ 過關</div>' + para(L().done);
+    if (!on) return;
+    box.innerHTML = '<div class="head">✓ 過關</div>' + para(L().done);
+    // The way out. Without it the only way forward was a small arrow at the
+    // top of the panel, which is nowhere near where the reader is looking when
+    // they have just succeeded.
+    if (at < LESSONS.length - 1) {
+      const p = document.createElement('p'); p.className = 'onward';
+      const b = document.createElement('button');
+      b.textContent = '下一章：' + LESSONS[at + 1].title + ' →';
+      b.onclick = () => load(at + 1);
+      p.appendChild(b); box.appendChild(p);
+    }
   }
 
   // The compiler is the marker. Nothing here looks at what you typed: it asks

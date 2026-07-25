@@ -6,6 +6,17 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.8.1 — wish 1.0, genie 1.0
+
+- **Passing a chapter offered no way onward.** The only route forward was a
+  small arrow at the top of the panel, which is nowhere near where a reader is
+  looking at the moment they have just succeeded. The seal at the foot of the
+  chapter now names the next one and goes there.
+- **The table of contents was two full rows** of numbered chapters, and it
+  shouted louder than the chapter being read. It is a single hairline of
+  twenty-eight ticks now — solved in green, current taller and darker — and the
+  full table drops down on hover, or on focus, so a keyboard can still reach it.
+
 ## loophole 1.8.0 — wish 1.0, genie 1.0
 
 **A course, rather than a worksheet.** The previous set was twenty-one
