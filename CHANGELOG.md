@@ -6,6 +6,14 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.1.1 — wish 1.0, genie 1.0
+
+- **The world banner printed only the genie's counter register.** A world with a
+  second register showed it nowhere, while the report below went on to discuss
+  its value — the reader was told about a number the header never mentioned. It
+  stayed invisible for as long as every bundled example happened to declare
+  exactly one register. All registers are now listed, in declaration order.
+
 ## loophole 1.1.0 — wish 1.0, genie 1.0
 
 **The compiler is now `loophole`, not `wishc`.** Loophole was being used as the

@@ -64,7 +64,7 @@
 // whichever language grew it. Dependants (an editor plugin, a judge) pin
 // against these.
 // ---------------------------------------------------------------------------
-static const char* COMPILER_VERSION = "1.1.0";
+static const char* COMPILER_VERSION = "1.1.1";
 static const char* WISH_VERSION     = "1.0";
 static const char* GENIE_VERSION    = "1.0";
 
@@ -2350,8 +2350,17 @@ int main(int argc, char** argv) {
     std::cout << "== loophole " << (hunt ? "--hunt ==  " : "==  ") << path;
     if (genie_path) std::cout << "   [genie: " << genie_path << "]";
     std::cout << "\n";
-    std::cout << "world: " << genie.counter << " = " << world.regs[genie.counter].val
-              << "  (uint<" << world.regs[genie.counter].width << ">)";
+    // Every register, in declaration order — not just the genie's counter. The
+    // counter used to be the only one printed, which was invisible for as long
+    // as every example happened to declare exactly one register: the reader of
+    // a two-register world would watch the report discuss a value the banner
+    // never showed them.
+    std::cout << "world:";
+    for (size_t i = 0; i < prog.decls.size(); i++) {
+        const Reg& r = world.regs[prog.decls[i].name];
+        std::cout << (i ? ", " : " ") << prog.decls[i].name << " = " << r.val
+                  << " (uint<" << r.width << ">)";
+    }
     if (!world.people.empty()) {
         std::cout << ", people:";
         for (const auto& p : world.people) std::cout << " " << p;

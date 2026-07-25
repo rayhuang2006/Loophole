@@ -58,7 +58,7 @@ wish experiment_again {
 下載編好的（[Releases](https://github.com/rayhuang2006/Loophole/releases)，Linux 和 macOS）：
 
 ```bash
-curl -L -o loophole https://github.com/rayhuang2006/Loophole/releases/latest/download/loophole-1.1.0-macos-arm64
+curl -L -o loophole https://github.com/rayhuang2006/Loophole/releases/latest/download/loophole-1.1.1-macos-arm64
 chmod +x loophole && sudo mv loophole /usr/local/bin/
 ```
 
@@ -182,12 +182,12 @@ wish tidy {
 
 ```bash
 ./loophole --json examples/01_humble.wish     # 機器可讀的判決
-./loophole --version                          # loophole 1.1.0  (wish 1.0, genie 1.0)
+./loophole --version                          # loophole 1.1.1  (wish 1.0, genie 1.0)
 ```
 
 ```json
 {
-  "loophole": "1.1.0",
+  "loophole": "1.1.1",
   "languages": { "wish": "1.0", "genie": "1.0" },
   "wishes": [
     { "wish": "humble", "legal": true,
