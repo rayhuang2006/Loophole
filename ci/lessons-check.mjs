@@ -75,8 +75,24 @@ wish paradox { promise not granted(self) }
   hunt:       { },                                   // pressing Hunt is the goal
 };
 
-const create = require(root + 'web/loophole.js');
-const M = await create();
+// Anything that throws here — a module that will not load, a node the glue
+// does not support — must come out as a GitHub annotation. Annotations are
+// readable without auth; the logs are not, and a bare "exit code 2" cost two
+// rounds of guessing the last time this happened.
+process.on('uncaughtException', (e) => {
+  console.log('::error::lessons-check crashed: ' + (e && e.stack || e));
+  process.exit(1);
+});
+
+let M;
+try {
+  const create = require(root + 'web/loophole.js');
+  M = await create();
+} catch (e) {
+  console.log('::error::could not load web/loophole.js: ' + (e && e.stack || e));
+  console.log('::error::node ' + process.version + ' on ' + process.platform);
+  process.exit(1);
+}
 
 function judge(wish, genie) {
   const r = M.judge(wish, genie || '', false, false, 0, 0);
@@ -85,7 +101,11 @@ function judge(wish, genie) {
 }
 
 let rc = 0;
-const fail = (id, msg) => { console.log(`FAIL ${id} — ${msg}`); rc = 1; };
+const fail = (id, msg) => {
+  console.log(`FAIL ${id} — ${msg}`);
+  console.log(`::error::lesson ${id}: ${msg}`);
+  rc = 1;
+};
 
 for (const L of LESSONS) {
   const ans = ANSWERS[L.id];

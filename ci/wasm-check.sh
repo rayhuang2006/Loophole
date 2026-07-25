@@ -25,10 +25,15 @@ both() {
   $NATIVE "$@" > "$tmp/n.txt" 2>&1; local rn=$?
   $WASM   "$@" > "$tmp/w.txt" 2>&1; local rw=$?
   if [ "$rn" != "$rw" ]; then
-    echo "FAIL $label — exit codes differ: native $rn, wasm $rw"; rc=1; return
+    echo "FAIL $label — exit codes differ: native $rn, wasm $rw"
+    echo "::error::$label exit codes differ: native $rn, wasm $rw"
+    rc=1; return
   fi
   if ! diff -u "$tmp/n.txt" "$tmp/w.txt" > "$tmp/d.txt"; then
-    echo "FAIL $label — output differs:"; sed -n '1,30p' "$tmp/d.txt"; rc=1; return
+    echo "FAIL $label — output differs:"; sed -n '1,30p' "$tmp/d.txt"
+    # As an annotation too: those are readable without auth, the logs are not.
+    echo "::error::$label differs: $(sed -n '3,8p' "$tmp/d.txt" | tr '\n' ' ')"
+    rc=1; return
   fi
   return 0
 }
