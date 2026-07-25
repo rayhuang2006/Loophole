@@ -33,9 +33,16 @@ jobs:
         # one the specification describes, so the same comparison CI runs is a
         # precondition for publishing rather than a separate opinion about it.
         run: |
-          make
-          make wasm
-          make wasm-check
+          set +e
+          make && make wasm && make wasm-check > /tmp/wc.txt 2>&1
+          rc=$?
+          cat /tmp/wc.txt 2>/dev/null
+          if [ $rc -ne 0 ]; then
+            while IFS= read -r line; do
+              [ -n "$line" ] && echo "::error::$line"
+            done < /tmp/wc.txt 2>/dev/null
+            exit $rc
+          fi
 
       - uses: actions/upload-pages-artifact@v3
         with:

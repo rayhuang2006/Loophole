@@ -124,4 +124,17 @@ jobs:
           make wasm
 
       - name: The two builds must agree
-        run: make wasm-check
+        run: |
+          # Capture and re-emit as annotations. The logs API needs auth and the
+          # annotation API does not, so a failure that only lives in the log is
+          # a failure nobody can read without clicking through the web UI.
+          set +e
+          make wasm-check > /tmp/wc.txt 2>&1
+          rc=$?
+          cat /tmp/wc.txt
+          if [ $rc -ne 0 ]; then
+            while IFS= read -r line; do
+              [ -n "$line" ] && echo "::error::$line"
+            done < /tmp/wc.txt
+            exit $rc
+          fi
