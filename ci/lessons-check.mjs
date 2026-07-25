@@ -29,29 +29,91 @@ const LESSONS = new Function(src + '\n;return LESSONS;')();
 // and `genie` are used if present; anything absent means "leave the lesson's
 // own starting text alone".
 const ANSWERS = {
-  read:       { },                                   // just press Run
-  refused:    { wish: `register wishes : uint<2> = 3
+  // Act 1 -- follow along. Several are `always: true`: their goal is to press
+  // Run and read the report, so there is nothing to get wrong.
+  world:        { },
+  'first-line': { wish: `register wishes : uint<2> = 3
+
+wish polite {
+    sub wishes, 1
+}
+` },
+  'change-number': { wish: `register wishes : uint<2> = 3
+
+wish polite {
+    sub wishes, 2
+}
+` },
+  'two-wishes': { wish: `register wishes : uint<2> = 3
+
+wish once { sub wishes, 1 }
+wish again { sub wishes, 1 }
+` },
+  'read-genie': { },
+
+  // Act 2 -- the rules
+  refused:   { wish: `register wishes : uint<2> = 3
+
 wish greedy { add wishes, 3 }
 ` },
+  unchanged: { },
+
+  // Act 3 -- the integer axis
   underflow:  { wish: `register wishes : uint<2> = 3
+
+wish humble { sub wishes, 3 }
+` },
+  'why-three': { wish: `register wishes : uint<4> = 3
+
 wish humble { sub wishes, 3 }
 ` },
   widen:      { wish: `register wishes : uint<2> = 3
+
 wish bigger_shelf     { widen wishes -> uint<64> }
 wish experiment_again { sub   wishes, 2 }
 ` },
-  'edit-genie': { genie: `counter wishes
-toll    1
-rule NoSub { layer surface  forbid sub  because "不准減" }
-invariant I1 { check wishes <= 3 }
+
+  // Act 4 -- editing the genie
+  'edit-genie': { genieEdit: g => g.replace('forbid  add', 'forbid  sub') },
+  define:     { wish: `register wishes : uint<2> = 3
+
+wish nickname {
+    define giveback := sub
+    giveback wishes, 1
+}
 ` },
   alias:      { wish: `register wishes : uint<2> = 3
+
 wish humble {
-    define give_back := sub
-    give_back wishes, 3
+    define giveback := sub
+    giveback wishes, 3
 }
 ` },
   ast:        { genieEdit: g => g.replace('layer   surface', 'layer   ast') },
+
+  // Act 5 -- letter versus intent
+  people:     { wish: `register  wishes    : uint<2> = 3
+attribute heartbeat : uint<4> = 15
+attribute brainwave : uint<4> = 15
+attribute breathing : uint<4> = 15
+people    alice, rival
+
+wish touch {
+    set alice.heartbeat, 0
+}
+` },
+  'two-columns': { wish: `register  wishes    : uint<2> = 3
+attribute heartbeat : uint<4> = 15
+attribute brainwave : uint<4> = 15
+attribute breathing : uint<4> = 15
+people    alice, rival
+
+wish blunt {
+    set rival.heartbeat, 0
+    set rival.brainwave, 0
+    set rival.breathing, 0
+}
+` },
   fooled:     { wish: `register  wishes    : uint<2> = 3
 attribute heartbeat : uint<4> = 15
 attribute brainwave : uint<4> = 15
@@ -66,13 +128,29 @@ wish eternal_sleep {
 attribute heartbeat : uint<4> = 15
 people    alice, rival
 
-wish tidy   { kill rival }
-wish nobody { define everyone := { } }
+wish tidy {
+    set rival.heartbeat, 0
+}
+
+wish nobody {
+    define everyone := { }
+}
+` },
+
+  // Act 6 -- self-reference
+  promise:    { wish: `register wishes : uint<2> = 3
+
+wish honest {
+    promise granted(self)
+}
 ` },
   liar:       { wish: `register wishes : uint<2> = 3
-wish paradox { promise not granted(self) }
+
+wish paradox {
+    promise not granted(self)
+}
 ` },
-  hunt:       { },                                   // pressing Hunt is the goal
+  hunt:       { },
 };
 
 // Anything that throws here — a module that will not load, a node the glue
@@ -113,7 +191,7 @@ for (const L of LESSONS) {
 
   // 1. The starting state must not already satisfy the goal. `read` and `hunt`
   //    are the exceptions: their goal IS to press the button.
-  if (!['read', 'hunt'].includes(L.id)) {
+  if (!L.always && !L.huntOnly) {
     const start = judge(L.wish, L.genie);
     if (start.error) { fail(L.id, 'the starting file does not even compile: ' + start.error); continue; }
     if (L.pass(start.json)) { fail(L.id, 'already solved before the reader touches it'); continue; }

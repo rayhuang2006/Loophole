@@ -1,175 +1,306 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>Loophole — playground</title>
+<title>Loophole — 學會鑽精靈的漏洞</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
+  /* A warm paper palette: this is a project about a fairy tale that happens to
+     compile, and a cold IDE grey would be lying about what it is. */
   :root {
-    --bg: #fbfaf7; --fg: #1c1b19; --dim: #6b675f; --line: #e0dcd3;
-    --panel: #fff; --accent: #8a5a2b;
-    --red: #b3261e; --green: #2e6b34; --cyan: #1f5f7a;
+    --bg: #f7f4ed;  --panel: #fffdf8;  --sunk: #efeae0;
+    --fg: #23201b;  --dim: #7a7469;    --faint: #a8a29a;
+    --line: #ddd6c8;
+    --ink: #8a5a2b;                    /* the accent: old ink */
+    --red: #a8321f;  --green: #2f6a3a; --blue: #1f5772;  --violet: #6b4a8f;
+    --shadow: 0 1px 2px rgba(35,32,27,.05), 0 4px 12px rgba(35,32,27,.04);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #16150f; --fg: #e8e4da; --dim: #97928a; --line: #2f2d26;
-      --panel: #1d1c16; --accent: #d3a05e;
-      --red: #f2867c; --green: #8fd096; --cyan: #7fc4de;
+      --bg: #14130f;  --panel: #1c1a16;  --sunk: #100f0c;
+      --fg: #ece7dc;  --dim: #9b958a;    --faint: #6d675e;
+      --line: #302d26;
+      --ink: #d8a862;
+      --red: #f0897b; --green: #92d69c; --blue: #82c6e0; --violet: #c3a4e8;
+      --shadow: none;
     }
   }
   * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
   body {
     margin: 0; background: var(--bg); color: var(--fg);
-    font: 15px/1.55 ui-sans-serif, system-ui, "Helvetica Neue", sans-serif;
+    font: 15px/1.65 ui-sans-serif, system-ui, "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
-  header {
-    padding: 22px 20px 14px; border-bottom: 1px solid var(--line);
+
+  /* ---- masthead --------------------------------------------------- */
+  header { padding: 26px 24px 0; max-width: 1500px; margin: 0 auto; }
+  h1 { margin: 0; font-size: 21px; font-weight: 650; letter-spacing: -.015em; }
+  h1 em { font-style: normal; color: var(--dim); font-weight: 400; }
+  .sub { margin: 5px 0 0; color: var(--dim); font-size: 14px; }
+
+  /* ---- the progress rail ------------------------------------------
+     Grouped by act, because twenty-one numbered pills read as a wall and
+     six named groups read as a shape you can hold. */
+  #rail {
+    max-width: 1500px; margin: 16px auto 0; padding: 0 24px;
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start;
   }
-  h1 { margin: 0; font-size: 19px; letter-spacing: -.01em; }
-  h1 span { color: var(--dim); font-weight: 400; }
-  header p { margin: 6px 0 0; color: var(--dim); max-width: 62ch; }
+  .actgrp { display: flex; flex-direction: column; gap: 5px; }
+  .actname {
+    font-size: 10.5px; letter-spacing: .08em; color: var(--faint);
+    text-transform: uppercase; white-space: nowrap;
+  }
+  .pills { display: flex; gap: 3px; }
+  .pill {
+    width: 26px; height: 26px; padding: 0; border-radius: 50%;
+    border: 1px solid var(--line); background: var(--panel); color: var(--dim);
+    font: 600 11.5px/1 ui-sans-serif, system-ui, sans-serif; cursor: pointer;
+    transition: transform .1s, background .15s;
+  }
+  .pill:hover { transform: translateY(-1px); }
+  .pill.solved { border-color: var(--green); color: var(--green); }
+  .pill.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .pill.on.solved { background: var(--green); border-color: var(--green); color: #fff; }
+
+  /* ---- layout ----------------------------------------------------- */
   main {
-    display: grid; gap: 14px; padding: 16px 20px 40px;
-    grid-template-columns: 1fr;
+    max-width: 1500px; margin: 0 auto; padding: 18px 24px 56px;
+    display: grid; gap: 18px; align-items: start;
+    grid-template-columns: minmax(0, 1fr);
   }
-  @media (min-width: 900px) { main { grid-template-columns: 1fr 1fr; } }
-  section { min-width: 0; }
-  .bar {
-    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-    margin-bottom: 8px;
+  @media (min-width: 1080px) {
+    main { grid-template-columns: minmax(330px, 400px) minmax(0, 1fr); }
+    #teach { position: sticky; top: 18px; }
   }
-  .bar h2 {
-    margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .07em;
+
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; box-shadow: var(--shadow);
+  }
+
+  /* ---- the lesson ------------------------------------------------- */
+  #teach { padding: 18px 20px 20px; }
+  .crumb {
+    display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px;
+    font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
+    color: var(--faint);
+  }
+  .crumb .grow { flex: 1; }
+  .crumb button {
+    border: 0; background: none; color: var(--dim); cursor: pointer;
+    font-size: 15px; padding: 0 4px; line-height: 1;
+  }
+  .crumb button:disabled { color: var(--line); cursor: default; }
+  #lesson-title { margin: 0 0 12px; font-size: 19px; font-weight: 650; letter-spacing: -.01em; }
+  #lesson-brief p { margin: 0 0 11px; }
+  #lesson-brief p:last-child { margin-bottom: 0; }
+
+  /* Inline code in prose. Scoped, because the highlighted layer inside the
+     editor is also a <code> and a chip background behind every token there
+     turns the whole pane into grey confetti. */
+  #lesson-brief code, .goal code, #hint code, #donebox code {
+    font: 12.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--sunk); padding: 1.5px 5px; border-radius: 4px;
+  }
+  #lesson-brief pre {
+    margin: 10px 0; padding: 11px 13px; background: var(--sunk);
+    border-radius: 7px; overflow-x: auto;
+    font: 12.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  /* Annotated syntax: the line, then what each piece of it is called. */
+  .anno {
+    margin: 11px 0 3px; padding: 9px 12px;
+    background: var(--sunk); border-radius: 7px;
+    font: 13.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .anno b { color: var(--violet); font-weight: 600; }
+  .anno i { color: var(--blue);   font-style: normal; }
+  .anno u { color: var(--green);  text-decoration: none; }
+  .anno s { color: var(--red);    text-decoration: none; }
+  .key { margin: 0 0 11px; font-size: 12.5px; color: var(--dim); line-height: 1.75; }
+  .key b { color: var(--violet); } .key i { color: var(--blue); font-style: normal; }
+  .key u { color: var(--green); text-decoration: none; }
+  .key s { color: var(--red); text-decoration: none; }
+
+  .goal {
+    margin: 14px 0 0; padding: 11px 13px;
+    background: var(--sunk); border-left: 3px solid var(--ink);
+    border-radius: 0 7px 7px 0;
+  }
+  .goal .lbl { font-weight: 650; color: var(--ink); }
+  .hintrow { margin: 11px 0 0; font-size: 13px; }
+  .hintrow button {
+    font: inherit; font-size: 12.5px; padding: 4px 11px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--dim);
+    border-radius: 999px; cursor: pointer;
+  }
+  #hint { color: var(--dim); }
+
+  #donebox {
+    margin: 14px 0 0; padding: 13px 15px; border-radius: 8px;
+    border: 1px solid var(--green);
+    background: color-mix(in srgb, var(--green) 7%, transparent);
+  }
+  #donebox .head {
+    margin-bottom: 7px; color: var(--green); font-weight: 650; font-size: 13px;
+  }
+  #donebox p { margin: 0 0 9px; } #donebox p:last-child { margin-bottom: 0; }
+
+  /* ---- the workspace --------------------------------------------- */
+  #work { display: grid; gap: 14px; grid-template-columns: minmax(0,1fr); }
+  @media (min-width: 1500px) { #work { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+  #work > .full { grid-column: 1 / -1; }
+
+  .pane { overflow: hidden; }
+  .panehead {
+    display: flex; align-items: center; gap: 9px;
+    padding: 9px 13px; border-bottom: 1px solid var(--line);
+  }
+  .panehead h2 {
+    margin: 0; font-size: 11px; font-weight: 650; letter-spacing: .09em;
     text-transform: uppercase; color: var(--dim);
   }
-  .grow { flex: 1; }
-  textarea, pre {
-    width: 100%; margin: 0; padding: 12px 14px;
-    background: var(--panel); color: var(--fg);
-    border: 1px solid var(--line); border-radius: 8px;
-    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-    tab-size: 4;
+  .panehead .grow { flex: 1; }
+  .btn {
+    font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--fg);
+    cursor: pointer;
   }
-  textarea { min-height: 210px; resize: vertical; }
-  textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-  pre { min-height: 210px; overflow: auto; white-space: pre; }
-  button, select {
-    font: inherit; font-size: 13px; padding: 6px 12px;
-    background: var(--panel); color: var(--fg);
-    border: 1px solid var(--line); border-radius: 6px; cursor: pointer;
+  .btn:hover:not(:disabled) { background: var(--sunk); }
+  .btn.primary {
+    background: var(--ink); border-color: var(--ink); color: #fff; font-weight: 600;
   }
-  button.run {
-    background: var(--accent); border-color: var(--accent); color: #fff;
-    font-weight: 600;
+  .btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  kbd {
+    font: 11px ui-monospace, Menlo, monospace; color: var(--faint);
+    border: 1px solid var(--line); border-radius: 4px; padding: 1px 4px;
   }
-  button:disabled { opacity: .5; cursor: default; }
-  .verdict {
-    display: inline-block; padding: 2px 9px; border-radius: 999px;
-    font-size: 12px; font-weight: 600; border: 1px solid currentColor;
+
+  /* ---- the editor -------------------------------------------------
+     A transparent textarea sitting exactly on top of a highlighted <pre>.
+     Native editing -- selection, undo, IME -- with colour underneath. A real
+     editor component would be a dependency, and the page is meant to stay
+     three files anybody can read straight through. */
+  .ed { position: relative; }
+  .ed pre, .ed textarea {
+    margin: 0; padding: 13px 15px; border: 0; width: 100%;
+    font: 13px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace;
+    tab-size: 4; white-space: pre; overflow-wrap: normal;
   }
-  .v0 { color: var(--green); }
-  .v1 { color: var(--accent); }
-  .v2 { color: var(--red); }
-  .ansi-red { color: var(--red); font-weight: 600; }
-  .ansi-green { color: var(--green); font-weight: 600; }
-  .ansi-cyan { color: var(--cyan); }
-  .ansi-bold { font-weight: 600; }
-  nav#steps {
-    display: flex; gap: 4px; flex-wrap: wrap;
-    padding: 10px 20px; border-bottom: 1px solid var(--line);
+  .ed pre { min-height: 250px; overflow: auto; pointer-events: none; }
+  .ed textarea {
+    position: absolute; inset: 0; resize: none; overflow: auto;
+    background: transparent; color: transparent; caret-color: var(--fg);
+    -webkit-text-fill-color: transparent;
   }
-  nav#steps button {
-    padding: 3px 9px; font-size: 12px; border-radius: 999px;
+  .ed textarea::selection { background: color-mix(in srgb, var(--ink) 28%, transparent); }
+  .ed textarea:focus { outline: 0; }
+  .ed.focus { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ink) 45%, transparent); }
+  .ed.tall pre { min-height: 330px; }
+
+  .t-kw   { color: var(--violet); font-weight: 600; }
+  .t-op   { color: var(--ink); }
+  .t-num  { color: var(--green); }
+  .t-str  { color: var(--red); }
+  .t-com  { color: var(--faint); font-style: italic; }
+  .t-type { color: var(--blue); }
+
+  /* ---- the report ------------------------------------------------- */
+  #out {
+    margin: 0; padding: 14px 16px; min-height: 190px; max-height: 62vh;
+    overflow: auto; white-space: pre; background: var(--panel);
+    font: 12.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
   }
-  nav#steps button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-  nav#steps button.solved { border-color: var(--green); color: var(--green); }
-  nav#steps button.on.solved { background: var(--green); color: #fff; }
-  article {
-    padding: 14px 16px; background: var(--panel);
-    border: 1px solid var(--line); border-radius: 8px;
+  #out.waiting { color: var(--dim); }
+  .chip {
+    display: inline-block; padding: 2px 10px; border-radius: 999px;
+    font-size: 11.5px; font-weight: 650; border: 1px solid currentColor;
   }
-  article h3 { margin: 0 0 8px; font-size: 17px; }
-  article p, article div { margin: 0 0 10px; }
-  article p:last-child, article div:last-child { margin-bottom: 0; }
-  article code {
-    font: 12.5px ui-monospace, Menlo, monospace;
-    background: var(--bg); padding: 1px 5px; border-radius: 4px;
-  }
-  article pre {
-    min-height: 0; margin: 8px 0; padding: 10px 12px; font-size: 12.5px;
-    background: var(--bg);
-  }
-  .goal { padding: 9px 12px; border-left: 3px solid var(--accent); background: var(--bg); }
-  #hint { color: var(--dim); }
-  #donebox {
-    padding: 11px 13px; border-radius: 6px;
-    border: 1px solid var(--green); background: var(--bg);
-  }
-  #donebox b.head { color: var(--green); display: block; margin-bottom: 5px; }
+  .c0 { color: var(--green); } .c1 { color: var(--ink); } .c2 { color: var(--red); }
+  .a-red { color: var(--red); font-weight: 600; }
+  .a-green { color: var(--green); font-weight: 600; }
+  .a-cyan { color: var(--blue); }
+  .a-bold { font-weight: 600; }
+
   footer {
-    padding: 14px 20px 30px; color: var(--dim); font-size: 13px;
-    border-top: 1px solid var(--line);
+    max-width: 1500px; margin: 0 auto; padding: 0 24px 34px;
+    color: var(--faint); font-size: 12.5px;
   }
-  a { color: var(--accent); }
+  footer a { color: var(--dim); }
+  a { color: var(--ink); }
 </style>
 
 <header>
-  <h1>Loophole <span>— 把精靈的漏洞編譯出來</span></h1>
-  <p>
-    十一關，每一關讓你自己找出一個漏洞。全部跑在你的瀏覽器裡，沒有伺服器。
+  <h1>Loophole <em>— 學會鑽精靈的漏洞</em></h1>
+  <p class="sub">
+    二十一關。編譯器跑在你的瀏覽器裡，沒有伺服器。
+    <b>過關與否由編譯器自己判</b>，不是比對你有沒有寫出標準答案。
   </p>
 </header>
 
-<nav id="steps" aria-label="關卡"></nav>
+<div id="rail"></div>
 
 <main>
-  <section id="teach">
-    <div class="bar">
-      <h2 id="lesson-act"></h2>
+  <section id="teach" class="card">
+    <div class="crumb">
+      <span id="lesson-act"></span>
       <span class="grow"></span>
-      <button id="prev">←</button>
-      <button id="next">→</button>
+      <button id="prev" title="上一關">←</button>
+      <button id="next" title="下一關">→</button>
     </div>
-    <article id="lesson">
-      <h3 id="lesson-title"></h3>
-      <div id="lesson-brief"></div>
-      <p class="goal"><b>目標：</b><span id="lesson-goal"></span></p>
-      <p><button id="hintbtn">看提示</button> <span id="hint" hidden></span></p>
-      <div id="donebox" hidden></div>
-    </article>
+    <h2 id="lesson-title"></h2>
+    <div id="lesson-brief"></div>
+    <p class="goal"><span class="lbl">目標</span> <span id="lesson-goal"></span></p>
+    <p class="hintrow"><button id="hintbtn">看提示</button> <span id="hint" hidden></span></p>
+    <div id="donebox" hidden></div>
   </section>
 
-  <section>
-    <div class="bar">
-      <h2>wish</h2>
-      <span class="grow"></span>
-      <button class="run" id="run">Run</button>
-      <button id="hunt" title="窮舉界限內每一支願望程式，找出所有合規卻拆穿的">Hunt</button>
-      <button id="cancel" hidden>取消</button>
-    </div>
-    <textarea id="wish" spellcheck="false" aria-label="wish source"></textarea>
-  </section>
+  <div id="work">
+    <section class="card pane">
+      <div class="panehead">
+        <h2>wish — 你的願望</h2>
+        <span class="grow"></span>
+        <kbd id="kbd"></kbd>
+        <button class="btn primary" id="run">Run</button>
+        <button class="btn" id="hunt" title="窮舉界限內每一支願望程式">Hunt</button>
+        <button class="btn" id="cancel" hidden>取消</button>
+      </div>
+      <div class="ed" id="ed-wish">
+        <pre aria-hidden="true"><code id="hl-wish"></code></pre>
+        <textarea id="wish" spellcheck="false" autocapitalize="off"
+                  autocorrect="off" aria-label="wish source"></textarea>
+      </div>
+    </section>
 
-  <section>
-    <div class="bar">
-      <h2>genie</h2>
-      <span class="grow"></span>
-      <button id="reset">還原這一關</button>
-    </div>
-    <textarea id="genie" spellcheck="false" aria-label="genie policy"></textarea>
-  </section>
+    <section class="card pane">
+      <div class="panehead">
+        <h2>genie — 精靈的規矩</h2>
+        <span class="grow"></span>
+        <button class="btn" id="reset">還原這一關</button>
+      </div>
+      <div class="ed tall" id="ed-genie">
+        <pre aria-hidden="true"><code id="hl-genie"></code></pre>
+        <textarea id="genie" spellcheck="false" autocapitalize="off"
+                  autocorrect="off" aria-label="genie policy"></textarea>
+      </div>
+    </section>
 
-  <section style="grid-column: 1 / -1">
-    <div class="bar">
-      <h2>report</h2>
-      <span id="verdict"></span>
-    </div>
-    <pre id="out">載入編譯器…</pre>
-  </section>
+    <section class="card pane full">
+      <div class="panehead">
+        <h2>report — 判決</h2>
+        <span class="grow"></span>
+        <span id="verdict"></span>
+      </div>
+      <pre id="out" class="waiting">載入編譯器…</pre>
+    </section>
+  </div>
 </main>
 
 <footer>
   <span id="ver"></span> ·
   <a href="https://github.com/rayhuang2006/Loophole">原始碼</a> ·
-  <a href="https://github.com/rayhuang2006/Loophole/blob/main/docs/guide/tutorial.md">教學</a>
+  <a href="https://github.com/rayhuang2006/Loophole/blob/main/docs/spec/loophole-1.0.md">語言規格</a>
 </footer>
 
 <script src="./lessons.js"></script>
@@ -177,23 +308,73 @@
 (async () => {
   const $ = id => document.getElementById(id);
   const out = $('out'), verdict = $('verdict');
+  const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
-  // Escape codes come back from the compiler because the page asks for colour:
-  // the diagnostics were designed with it, and it is the same renderer the
-  // terminal uses. Only the four sequences the compiler emits are handled --
-  // this is not a general ANSI terminal.
-  const CLASSES = {
-    '1;31': 'ansi-red', '1;36': 'ansi-cyan', '1;32': 'ansi-green', '1': 'ansi-bold'
-  };
+  // ---- syntax highlighting ------------------------------------------
+  //
+  // The keyword list is the one in §3 of the specification. It is duplicated
+  // here, which is a real cost: add a keyword to the language and this goes
+  // stale silently. The fix is a `--keywords` flag on the compiler that this
+  // could read at load; until that exists, this comment is what holds the two
+  // together.
+  const KW = /^(register|attribute|people|wish|define|promise|counter|toll|concept|rule|invariant|layer|forbid|on|because|check|written|real|label|surface|ast|all|in|not|and|or|implies|granted|alive|self|consistent|max|before|true|false|sub|add|widen|set|kill|revive)$/;
+
+  function highlight(src) {
+    let o = '', i = 0, m;
+    const re = /(#[^\n]*)|("(?:[^"\\]|\\.)*")|(\buint\s*<\s*\d+\s*>)|(\b\d+\b)|([A-Za-z_一-鿿][\w一-鿿]*)|(:=|->|==|!=|<=|>=|[<>=+\-,.:(){}])/g;
+    while ((m = re.exec(src)) !== null) {
+      if (m.index > i) o += esc(src.slice(i, m.index));
+      const t = m[0];
+      if (m[1])      o += `<span class="t-com">${esc(t)}</span>`;
+      else if (m[2]) o += `<span class="t-str">${esc(t)}</span>`;
+      else if (m[3]) o += `<span class="t-type">${esc(t)}</span>`;
+      else if (m[4]) o += `<span class="t-num">${esc(t)}</span>`;
+      else if (m[5]) o += KW.test(t) ? `<span class="t-kw">${esc(t)}</span>` : esc(t);
+      else           o += `<span class="t-op">${esc(t)}</span>`;
+      i = m.index + t.length;
+    }
+    o += esc(src.slice(i));
+    // The trailing newline has to survive, or the highlighted layer ends a line
+    // short of the textarea and the last line loses its colour.
+    return o + '\n';
+  }
+
+  function wire(edId, taId, hlId) {
+    const ed = $(edId), ta = $(taId), hl = $(hlId);
+    const paint = () => { hl.innerHTML = highlight(ta.value); };
+    const sync = () => {
+      hl.parentElement.scrollTop = ta.scrollTop;
+      hl.parentElement.scrollLeft = ta.scrollLeft;
+    };
+    ta.addEventListener('input', () => { paint(); sync(); });
+    ta.addEventListener('scroll', sync);
+    ta.addEventListener('focus', () => ed.classList.add('focus'));
+    ta.addEventListener('blur', () => ed.classList.remove('focus'));
+    // Tab inserts spaces. Losing focus to the next control mid-line is worse
+    // than losing the tab key, in an editor with no other way to indent.
+    ta.addEventListener('keydown', e => {
+      if (e.key !== 'Tab' || e.metaKey || e.ctrlKey) return;
+      e.preventDefault();
+      const s = ta.selectionStart, t = ta.selectionEnd;
+      ta.value = ta.value.slice(0, s) + '    ' + ta.value.slice(t);
+      ta.selectionStart = ta.selectionEnd = s + 4;
+      paint();
+    });
+    return paint;
+  }
+  const paintWish = wire('ed-wish', 'wish', 'hl-wish');
+  const paintGenie = wire('ed-genie', 'genie', 'hl-genie');
+
+  // ---- report rendering ---------------------------------------------
+  // Only the four sequences the compiler emits. Not a terminal.
+  const ANSI = { '1;31': 'a-red', '1;36': 'a-cyan', '1;32': 'a-green', '1': 'a-bold' };
   function render(text) {
-    let html = '', open = 0, i = 0;
-    const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+    let html = '', open = 0, i = 0, m;
     const re = /\x1b\[([0-9;]*)m/g;
-    let m;
     while ((m = re.exec(text)) !== null) {
       html += esc(text.slice(i, m.index));
-      if (m[1] === '0' || m[1] === '') { while (open--) html += '</span>'; open = 0; }
-      else if (CLASSES[m[1]]) { html += `<span class="${CLASSES[m[1]]}">`; open++; }
+      if (m[1] === '0' || m[1] === '') { while (open-- > 0) html += '</span>'; open = 0; }
+      else if (ANSI[m[1]]) { html += `<span class="${ANSI[m[1]]}">`; open++; }
       i = m.index + m[0].length;
     }
     html += esc(text.slice(i));
@@ -201,34 +382,38 @@
     return html;
   }
 
-  // The compiler is instantiated once, inside the worker. The page asks it for
-  // the built-in genie and the version strings rather than loading a second
-  // 450 KB copy of the module here just to read two constants.
+  // Lesson text: blank lines separate paragraphs, `**x**` marks a term. Every
+  // other tag is written as HTML, because this text is content the repo owns.
+  function para(text) {
+    return text.trim().split(/\n\s*\n/).map(t => {
+      const b = t.trim().replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+      return /^<(pre|div)/.test(b) ? b : '<p>' + b + '</p>';
+    }).join('');
+  }
+
+  // ---- the compiler, in a worker ------------------------------------
   let worker = null, pending = 0, timer = null, booted = false, builtinGenie = '';
 
   function spawn() {
-    // Never cache the worker. It is a kilobyte, and a stale one paired with a
-    // newer page is a bug that reads as a logic error rather than a caching one:
-    // the page asks for a field the old worker does not send, so every lesson
-    // silently reports "not solved". The 370 KB module it loads is a different
-    // URL and stays cached normally.
+    // Never cached: it is a kilobyte, and a stale worker paired with a newer
+    // page reads as a logic error rather than a caching one -- the page asks
+    // for a field the old worker does not send, so every lesson silently
+    // reports "not solved". The 370 KB module it loads is a different URL and
+    // stays cached normally.
     worker = new Worker('./worker.js?v=' + Date.now());
-    worker.onmessage = (e) => {
+    worker.onmessage = e => {
       const d = e.data;
       if (d.type === 'ready') {
         const [c, w, g] = d.versions.split('|');
-        $('ver').textContent = `loophole ${c} (wish ${w}, genie ${g})`;
-        if (!booted) {
-          builtinGenie = d.genie;
-          booted = true;
-          load(0);
-        }
+        $('ver').textContent = `loophole ${c} · wish ${w} · genie ${g}`;
+        if (!booted) { builtinGenie = d.genie; booted = true; load(0); }
         return;
       }
-      if (d.id !== pending) return;    // a stale reply from before a cancel
+      if (d.id !== pending) return;      // stale reply from before a cancel
       finish(d);
     };
     worker.onerror = () => {
+      out.className = '';
       out.textContent = '編譯器載不起來。這個頁面需要 WebAssembly 和 Web Worker。';
     };
   }
@@ -238,43 +423,27 @@
     $('run').disabled = $('hunt').disabled = on;
     $('cancel').hidden = !on;
     if (timer) { clearInterval(timer); timer = null; }
-    if (on) {
-      const t0 = Date.now();
-      out.textContent = what + '…';
-      timer = setInterval(() => {
-        out.textContent = what + '… ' + ((Date.now() - t0) / 1000).toFixed(1) + 's';
-      }, 100);
-    }
+    if (!on) return;
+    out.className = 'waiting';
+    const t0 = Date.now();
+    out.textContent = what + '…';
+    timer = setInterval(() => {
+      out.textContent = what + '… ' + ((Date.now() - t0) / 1000).toFixed(1) + 's';
+    }, 100);
   }
 
   function finish(d) {
     busy(false);
+    out.className = '';
     if (d.error) { out.textContent = '編譯器爆炸了（這是 bug，請回報）：' + d.error; return; }
     out.innerHTML = render(d.output) || '(沒有輸出)';
     const label = { 0: '沒有 exploit', 1: '有 exploit', 2: '讀不懂' }[d.code];
-    verdict.className = 'verdict v' + d.code;
-    verdict.textContent = `exit ${d.code} — ${label}`;
+    verdict.innerHTML = `<span class="chip c${d.code}">exit ${d.code} · ${label}</span>`;
     mark(d);
   }
 
-  // ---- lessons ------------------------------------------------------
-  //
-  // Progress is per-lesson and kept in localStorage, so closing the tab does
-  // not throw away an hour. The lesson TEXT is never stored: it is content and
-  // it changes, and a reader returning to a rewritten lesson should get the new
-  // one, not a stale copy of the old.
-  // Lesson text is written the way it reads in the source: blank lines between
-  // paragraphs, `**bold**` where a term is being named. Everything else -- <b>,
-  // <code>, <pre> -- is written as HTML, because the text is content this repo
-  // controls, not something a reader supplies.
-  function para(text) {
-    return text.trim().split(/\n\s*\n/).map(t => {
-      const body = t.trim().replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
-      return body.startsWith('<pre') ? body : '<p>' + body + '</p>';
-    }).join('');
-  }
-
-  const KEY = 'loophole.solved.v1';
+  // ---- lessons -------------------------------------------------------
+  const KEY = 'loophole.solved.v2';
   let solved = new Set();
   try { solved = new Set(JSON.parse(localStorage.getItem(KEY) || '[]')); } catch (_) {}
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify([...solved])); } catch (_) {} };
@@ -282,68 +451,70 @@
   let at = 0;
   const L = () => LESSONS[at];
 
-  function drawSteps() {
-    const nav = $('steps');
-    nav.textContent = '';
-    LESSONS.forEach((l, i) => {
-      const b = document.createElement('button');
-      b.textContent = (i + 1) + (solved.has(l.id) ? ' ✓' : '');
-      b.title = l.title;
-      b.className = (i === at ? 'on ' : '') + (solved.has(l.id) ? 'solved' : '');
-      b.onclick = () => load(i);
-      nav.appendChild(b);
-    });
+  function drawRail() {
+    const rail = $('rail');
+    rail.textContent = '';
+    let n = 0;
+    for (const act of [...new Set(LESSONS.map(l => l.act))]) {
+      const grp = document.createElement('div'); grp.className = 'actgrp';
+      const nm = document.createElement('div'); nm.className = 'actname';
+      nm.textContent = act.replace(/^[一二三四五六七]、/, '');
+      const pills = document.createElement('div'); pills.className = 'pills';
+      for (const l of LESSONS.filter(x => x.act === act)) {
+        const i = n++;
+        const b = document.createElement('button');
+        b.className = 'pill' + (i === at ? ' on' : '') + (solved.has(l.id) ? ' solved' : '');
+        b.textContent = i + 1;
+        b.title = l.title;
+        b.onclick = () => load(i);
+        pills.appendChild(b);
+      }
+      grp.append(nm, pills);
+      rail.appendChild(grp);
+    }
   }
 
-  function load(i, keepEdits) {
+  function load(i) {
     at = Math.max(0, Math.min(LESSONS.length - 1, i));
     const l = L();
     $('lesson-act').textContent = l.act;
     $('lesson-title').textContent = (at + 1) + '. ' + l.title;
-    // The lesson text is written with a blank line between paragraphs, the way
-    // it reads in the source. Turn those into paragraphs rather than making the
-    // author write tags for something that is just a line break.
     $('lesson-brief').innerHTML = para(l.brief);
     $('lesson-goal').innerHTML = l.goal;
-    $('hintbtn').hidden = !l.hint;
+    $('hintbtn').parentElement.hidden = !l.hint;
     $('hint').hidden = true;
     $('hint').innerHTML = l.hint || '';
-    if (!keepEdits) {
-      $('wish').value = l.wish;
-      $('genie').value = l.genie === null || l.genie === undefined ? builtinGenie : l.genie;
-    }
+    $('hintbtn').textContent = '看提示';
+    $('wish').value = l.wish;
+    $('genie').value = (l.genie === null || l.genie === undefined) ? builtinGenie : l.genie;
+    paintWish(); paintGenie();
     $('prev').disabled = at === 0;
     $('next').disabled = at === LESSONS.length - 1;
     showDone(solved.has(l.id));
+    out.className = 'waiting';
     out.textContent = l.huntOnly ? '按 Hunt。' : '按 Run。';
     verdict.textContent = '';
-    drawSteps();
+    drawRail();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   function showDone(on) {
     const box = $('donebox');
     box.hidden = !on;
-    if (!on) return;
-    box.innerHTML = '<b class="head">過關</b>' +
-      para(L().done);
+    if (on) box.innerHTML = '<div class="head">✓ 過關</div>' + para(L().done);
   }
 
-  // The compiler is the marker. Nothing here looks at what you typed -- it asks
-  // the genie whether you got away with it, which is the only question the
+  // The compiler is the marker. Nothing here looks at what you typed: it asks
+  // the genie whether you got away with it, which is the only question this
   // language has ever been about.
   function mark(d) {
     const l = L();
     let ok = false;
-    if (l.huntOnly) ok = true;                    // pressing Hunt is the goal
+    if (l.huntOnly) ok = true;
     else if (d.json) { try { ok = l.pass(JSON.parse(d.json)); } catch (_) {} }
-    if (ok && !solved.has(l.id)) { solved.add(l.id); save(); drawSteps(); }
+    if (ok && !solved.has(l.id)) { solved.add(l.id); save(); drawRail(); }
     showDone(ok || solved.has(l.id));
   }
-
-  $('prev').onclick = () => load(at - 1);
-  $('next').onclick = () => load(at + 1);
-  $('hintbtn').onclick = () => { $('hint').hidden = !$('hint').hidden; };
-  $('reset').onclick = () => load(at);
 
   function go(hunt) {
     if (!booted) return;
@@ -354,28 +525,28 @@
                          maxStmts: 2, maxWishes: 4 });
   }
 
-  $('cancel').onclick = () => {
-    // A search cannot be asked to stop politely — it is one long call inside
-    // wasm with no yield point. Killing the worker is the only way out, so a
-    // fresh one is started for the next run.
-    worker.terminate(); pending++; spawn(); busy(false);
-    out.textContent = '已取消。';
-    verdict.textContent = '';
-  };
   $('run').onclick = () => go(false);
   $('hunt').onclick = () => go(true);
+  $('prev').onclick = () => load(at - 1);
+  $('next').onclick = () => load(at + 1);
+  $('reset').onclick = () => load(at);
+  $('hintbtn').onclick = () => {
+    const h = $('hint');
+    h.hidden = !h.hidden;
+    $('hintbtn').textContent = h.hidden ? '看提示' : '收起提示';
+  };
   $('cancel').onclick = () => {
     // A search cannot be asked to stop politely -- it is one long call inside
-    // wasm. Killing the worker is the only way out, so a fresh one is started
-    // for the next run.
+    // wasm with no yield point. Killing the worker is the only way out.
     worker.terminate(); pending++; spawn(); busy(false);
-    out.textContent = '已取消。';
+    out.className = 'waiting'; out.textContent = '已取消。';
     verdict.textContent = '';
   };
 
-  // Cmd/Ctrl-Enter runs, the way every editor does it.
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+  $('kbd').textContent = (mac ? '⌘' : 'Ctrl') + '↩';
   document.addEventListener('keydown', e => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); go(false); }
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); go(L().huntOnly); }
   });
 })();
 </script>

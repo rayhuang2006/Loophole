@@ -6,6 +6,41 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.7.0 — wish 1.0, genie 1.0
+
+**The lessons were rewritten, because the first set taught nothing.** They were
+a list of objectives — "write a wish that gets refused" on lesson two, before
+anything had said what a statement looks like. That is a worksheet for somebody
+who can already write the language, and on lesson two nobody can.
+
+Twenty-one lessons now, in six acts, and **the first five ask no questions at
+all**: here is a line, here is what each part of it is called, type it and look
+at what changed. Thirteen of the twenty-one are that shape. The arc that used to
+be three lessons is now four, and the last act builds `promise` up before asking
+for the paradox.
+
+**`--json` gained two fields**, because the marking needed them and there was no
+honest way to get them otherwise:
+
+- `wrote` — the statements as typed, with `kind` and the surface `verb`. The
+  written form is the useful one: an alias reports the alias, which is the
+  distinction the whole language is about.
+- `registers` — the values after each wish. A judgment without the numbers it
+  was made from cannot be checked by anything downstream, and a lesson about what
+  `sub` does needs to see what `sub` did. The alternative was scraping it back
+  out of prose that §10.1 says may be reworded at will.
+
+**The page was redesigned.** Syntax highlighting is a transparent textarea over
+a highlighted `<pre>` — native editing, selection and IME intact, no editor
+dependency, and the page stays three files anybody can read straight through.
+The progress rail groups the lessons by act, because twenty-one numbered circles
+read as a wall and six named groups read as a shape. Warm paper rather than IDE
+grey: this is a fairy tale that happens to compile.
+
+The keyword list for highlighting is duplicated from §3 of the specification and
+will go stale silently if the language grows. The fix is a `--keywords` flag on
+the compiler; until that exists the duplication is marked in both places.
+
 ## loophole 1.6.0 — wish 1.0, genie 1.0
 
 **Eleven lessons.** The playground had nothing to do in it: a language nobody

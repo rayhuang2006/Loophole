@@ -66,7 +66,7 @@
 // whichever language grew it. Dependants (an editor plugin, a judge) pin
 // against these.
 // ---------------------------------------------------------------------------
-static const char* COMPILER_VERSION = "1.6.0";
+static const char* COMPILER_VERSION = "1.7.0";
 static const char* WISH_VERSION     = "1.0";
 static const char* GENIE_VERSION    = "1.0";
 
@@ -2387,11 +2387,31 @@ static const char* verdictJson(InvStatus s) {
     return "?";
 }
 
+// The statements as WRITTEN, verb and all. The surface form is the useful one
+// for a dependant: an alias reports the alias, which is exactly the distinction
+// the language is about, and the resolved form is already visible in the
+// verdict. `kind` separates the three statement forms so nothing has to parse.
+static void emitStmtsJson(std::ostream& out, const Wish& w) {
+    out << "      \"wrote\": [";
+    for (size_t i = 0; i < w.body.size(); i++) {
+        const Stmt& st = w.body[i];
+        out << (i ? ", " : "") << "{ \"kind\": \"";
+        switch (st.kind) {
+            case StmtKind::Op:      out << "op\", \"verb\": \"" << jsonEsc(st.verb); break;
+            case StmtKind::Define:  out << "define\", \"name\": \"" << jsonEsc(st.defname); break;
+            case StmtKind::Promise: out << "promise"; break;
+        }
+        out << "\", \"line\": " << st.line << " }";
+    }
+    out << "],\n";
+}
+
 static void emitWishJson(std::ostream& out, const Wish& w, const Outcome& o,
-                         const Genie& g) {
+                         const Genie& g, const World& world) {
     out << "    {\n";
     out << "      \"wish\": \"" << jsonEsc(w.name) << "\",\n";
     out << "      \"legal\": " << (o.legal ? "true" : "false") << ",\n";
+    emitStmtsJson(out, w);
     if (!o.legal) {
         out << "      \"refused\": \"" << jsonEsc(o.illegal_reason) << "\",\n";
         out << "      \"invariants\": [],\n";
@@ -2412,6 +2432,18 @@ static void emitWishJson(std::ostream& out, const Wish& w, const Outcome& o,
         out << " }" << (i + 1 < o.invs.size() ? "," : "") << "\n";
     }
     out << "      ],\n";
+    // The world after this wish. A judgment without the numbers it was made
+    // from cannot be checked by anything downstream -- a lesson about what `sub`
+    // does needs to see what `sub` did, and the alternative is parsing it back
+    // out of the prose the contract says may be reworded at will.
+    out << "      \"registers\": {";
+    bool firstReg = true;
+    for (const auto& kv : world.regs) {
+        out << (firstReg ? " " : ", ") << "\"" << jsonEsc(kv.first) << "\": "
+            << kv.second.val;
+        firstReg = false;
+    }
+    out << " },\n";
     out << "      \"exploit\": " << (o.breach() ? "true" : "false") << ",\n";
     out << "      \"breached\": [";
     bool first = true;
@@ -2444,7 +2476,7 @@ static int runJson(std::ostream& out, const Program& prog, const Genie& genie,
         Outcome o = grantWish(prog.wishes[i], genie, world, nullptr);
         if (!o.error.empty()) { std::cerr << o.error << "\n"; return 2; }
         if (o.breach()) exploits++;
-        emitWishJson(out, prog.wishes[i], o, genie);
+        emitWishJson(out, prog.wishes[i], o, genie, world);
         out << (i + 1 < prog.wishes.size() ? "," : "") << "\n";
     }
     out << "  ],\n";
