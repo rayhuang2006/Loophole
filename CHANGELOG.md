@@ -6,6 +6,34 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.2.0 — wish 1.0, genie 1.0
+
+**The report was rewritten.** It was written by someone who already knew the
+answers, and the first reader who did not could not tell what it was saying.
+Neither language changed; §10.1 states that the prose report is not part of the
+tool contract, and `--json` is unchanged.
+
+- **A rule and an invariant no longer look alike.** The old header listed them in
+  one comma-separated line — `genie: toll=1, NoMoreCandy[surface], NotTooMuch` —
+  so a gate that can refuse a wish and a ruler that only measures afterwards were
+  indistinguishable. They are now separate lines, labelled `refuses` and `holds`,
+  and a rule says in words which program its layer reads.
+- **Each wish is reported in the order §7 performs the steps**: rules, toll,
+  execution, checks, verdict. The old report streamed the execution trace and
+  then announced `STATUS: LEGAL` beneath it, which read as though the wish had
+  been run and then approved — backwards, and it made the toll look like a fee
+  charged for something already done.
+- **`FOOLED` shows both columns.** It used to print `FOOLED (2 in scope, all
+  hold)` followed by a sentence fragment, leaving the reader to work out which
+  half held. Both formulas and both results are now given, which is the whole
+  explanation: the genie's wording held, the thing it was protecting did not.
+- **`VIOLATED` no longer invents a result for the `real` column.** It was
+  printing `real ... holds` next to evidence that it failed. The `real` column is
+  not evaluated once the written one fails (§8.4), so nothing is claimed for it.
+- The world section lists people and their attributes, not only registers.
+- The report is entirely English now; one Chinese sentence used to be mixed into
+  the verdict line.
+
 ## loophole 1.1.1 — wish 1.0, genie 1.0
 
 - **The world banner printed only the genie's counter register.** A world with a

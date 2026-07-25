@@ -46,8 +46,9 @@ wish greedy {
 ```
 
 ```
-STATUS:  ILLEGAL — genie refuses
-R1: wish invokes 'add' on 'wishes' (line 9) — no wishing for more wishes
+rules     REFUSED. R1: wish invokes 'add' on 'wishes' (line 9) —
+          no wishing for more wishes
+verdict   not granted. the world is unchanged.
 ```
 
 精靈不是笨蛋。直接要更多願望會被當場擋下，這是它唯一真正防得住的事。
@@ -130,7 +131,7 @@ wish blunt {
 }
 ```
 ```
-STATUS:  ILLEGAL — NoKilling: wish invokes 'kill' — that word is not spoken here
+rules     REFUSED. NoKilling: wish invokes 'kill' — that word is not spoken here
 ```
 
 但禁字規則檢查的是你寫在**動詞位置**的那個字：
@@ -142,8 +143,13 @@ wish tidy {
 }
 ```
 ```
-STATUS:  LEGAL
-Life  all p in people: not dead(p)  ->  VIOLATED   (fails for: rival)
+rules     passed. no rule refuses this wish.
+ran       define mercy := kill
+          kill   rival   (all vitals -> 0)
+checks    Life        VIOLATED
+          written  FAILS  all p in people: not dead(p)   (fails for: rival)
+          broken in the genie's own words.
+verdict   EXPLOIT. legal, yet it broke Life.
 ```
 
 > 精靈把那個「字」列進黑名單，卻沒把那件「事」列進去。
@@ -203,10 +209,16 @@ wish eternal_sleep {
 }
 ```
 ```
-STATUS:  LEGAL
-Life  all p in people: not dead(p)  ->  FOOLED   (2 in scope, all hold)
-    the genie is satisfied. in reality (fails for: alice)
+rules     passed. no rule refuses this wish.
+ran       set    alice.brainwave, 0   (15 -> 0)
+checks    Life        FOOLED
+          written  holds  all p in people: not dead(p)      (2 in scope, all hold)
+          real     FAILS  all p in people: p.brainwave > 0  (fails for: alice)
+          the genie signed off on something untrue.
+verdict   EXPLOIT. legal, yet it broke Life (by fooling it).
 ```
+
+**兩欄並排就是重點。** 精靈自己寫的那句成立，它要保的那件事沒成立。
 
 alice 沒有「死」——她的心跳還在，不滿足「三個全歸零」。所以精靈簽字放行。
 但她的腦波是 0，人已經不在了。
@@ -314,10 +326,10 @@ wish w4 { }
 ./loophole --genie genie/careful.genie examples/08_eternal_sleep.wish
 ```
 ```
-wish tidy {
-    STATUS:  ILLEGAL — NoKilling: wish invokes 'kill' —
-                       that deed is not done here, whatever you call it
-}
+wish tidy
+    rules     REFUSED. NoKilling: wish invokes 'kill' (line 25) —
+              that deed is not done here, whatever you call it
+    verdict   not granted. the world is unchanged.
 ```
 
 取小名沒有用了。用 `--hunt` 量給你看死掉的是哪一條：

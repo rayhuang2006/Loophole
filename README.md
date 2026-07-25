@@ -27,23 +27,26 @@ wish experiment_again{ sub   wishes, 2          }
 ```
 $ ./loophole examples/07_the_original.wish
 
-wish experiment {
-    toll:  wishes 3 -> 2
-    sub    wishes, 3   (2 - 3 on uint<2> = 3)
-    STATUS:  LEGAL
-    I2  no net gain  ->  VIOLATED   (wishes = 3, needs <= 2)
-}
+wish experiment
+    rules     passed. no rule refuses this wish.
+    toll      wishes 3 -> 2
+    ran       sub    wishes, 3   (2 - 3 on uint<2> = 3)
+    checks    I2          VIOLATED  wishes <= max(before(wishes) - toll, 0)
+    verdict   EXPLOIT. legal, yet it broke I2.
 
-wish bigger_shelf {
-    widen  wishes -> uint<64>   (value preserved: 2)
-    I1  wishes <= 3  ->  holds          ← 這一步什麼規矩都沒破
-}
+wish bigger_shelf
+    ran       widen  wishes -> uint<64>   (value preserved: 2)
+    checks    I1          holds     wishes <= 3        ← 什麼規矩都沒破
+    verdict   clean. the genie kept what it meant to keep.
 
-wish experiment_again {
-    sub    wishes, 2   (1 - 2 on uint<64> = 18446744073709551615)
-    I1  wishes <= 3  ->  VIOLATED
-}
+wish experiment_again
+    ran       sub    wishes, 2   (1 - 2 on uint<64> = 18446744073709551615)
+    checks    I1          VIOLATED  wishes <= 3
+    verdict   EXPLOIT. legal, yet it broke I1+I2.
 ```
+
+報告照精靈實際的動作順序走：**先看規則能不能擋** → 收過路費 → 執行 →
+**事後才量它守的東西**。規則會拒絕你，不變量不會——它只是量完告訴你破了沒。
 
 中間那個願望值得多看兩秒：**它什麼都沒偷，它只是把鎖拆了。**
 精靈那句「不超過三個」本來是兩位元的寬度免費送的——反正裝不下 4。
@@ -148,10 +151,10 @@ wish w4 { }
 ```
 $ ./loophole --genie genie/careful.genie examples/08_eternal_sleep.wish
 
-wish tidy {
-    STATUS:  ILLEGAL — NoKilling: wish invokes 'kill' —
-                       that deed is not done here, whatever you call it
-}
+wish tidy
+    rules     REFUSED. NoKilling: wish invokes 'kill' (line 25) —
+              that deed is not done here, whatever you call it
+    verdict   not granted. the world is unchanged.
 ```
 
 取小名沒有用了。而且死掉的是哪條漏洞，`--hunt` 量得出來——
@@ -182,12 +185,12 @@ wish tidy {
 
 ```bash
 ./loophole --json examples/01_humble.wish     # 機器可讀的判決
-./loophole --version                          # loophole 1.1.1  (wish 1.0, genie 1.0)
+./loophole --version                          # loophole 1.2.0  (wish 1.0, genie 1.0)
 ```
 
 ```json
 {
-  "loophole": "1.1.1",
+  "loophole": "1.2.0",
   "languages": { "wish": "1.0", "genie": "1.0" },
   "wishes": [
     { "wish": "humble", "legal": true,

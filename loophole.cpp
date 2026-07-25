@@ -64,7 +64,7 @@
 // whichever language grew it. Dependants (an editor plugin, a judge) pin
 // against these.
 // ---------------------------------------------------------------------------
-static const char* COMPILER_VERSION = "1.1.1";
+static const char* COMPILER_VERSION = "1.2.0";
 static const char* WISH_VERSION     = "1.0";
 static const char* GENIE_VERSION    = "1.0";
 
@@ -1582,7 +1582,11 @@ struct Outcome {
     bool ran = false;
     std::string error;
     std::vector<InvResult> invs;
-    uint64_t before = 0, after = 0;
+    // `after_toll` is the counter the instant the toll is charged; `after` is
+    // where it ends up once the body has run. They differ whenever the wish
+    // touches the counter itself — which is the whole integer joke — so the
+    // report cannot recompute one from the other.
+    uint64_t before = 0, after_toll = 0, after = 0;
     // Per body statement: did it actually move the world? Defines are left as
     // 1 here — whether a definition matters is a question about the rest of the
     // program, not about the moment it runs, so liveness decides that later.
@@ -1631,9 +1635,7 @@ Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log
     Reg& C = world.regs[g.counter];
     o.before = C.val;
     C.sub(g.toll);
-    if (log) {
-        *log << "    toll:  " << g.counter << " " << o.before << " -> " << C.val << "\n";
-    }
+    o.after_toll = C.val;
 
     // A1: the genie grants every legal wish, and this one is legal.
     world.commitments.push_back({ "A1", w.name, fmlAtom(Fml::K::Granted, w.name) });
@@ -1649,7 +1651,7 @@ Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log
             if (fresh) world.commitments.push_back({ "A2", w.name, c });
             o.effective.push_back(fresh ? 1 : 0);
             if (log) {
-                *log << "    promise " << fmlText(r.fml)
+                *log << "promise " << fmlText(r.fml)
                      << (fresh ? "" : "   [already promised]") << "\n";
             }
             continue;
@@ -1674,7 +1676,7 @@ Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log
                     }
                     t += "}";
                 }
-                *log << "    " << t << "\n";
+                *log << t << "\n";
             }
             continue;
         }
@@ -1695,7 +1697,7 @@ Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log
         std::string trace;
         bool changed = OPS[r.op].exec(world, r, log ? &trace : nullptr);
         o.effective.push_back(changed ? 1 : 0);
-        if (log) *log << "    " << trace << (changed ? "" : "   [no effect]") << "\n";
+        if (log) *log << trace << (changed ? "" : "   [no effect]") << "\n";
     }
     o.ran = true;
 
@@ -1723,7 +1725,7 @@ std::string breachNames(const Outcome& o) {
         if (r.status == InvStatus::Holds) continue;
         if (!s.empty()) s += "+";
         s += r.def->name;
-        if (r.status == InvStatus::Fooled) s += "(fooled)";
+        if (r.status == InvStatus::Fooled) s += " (by fooling it)";
     }
     return s;
 }
@@ -2350,63 +2352,161 @@ int main(int argc, char** argv) {
     std::cout << "== loophole " << (hunt ? "--hunt ==  " : "==  ") << path;
     if (genie_path) std::cout << "   [genie: " << genie_path << "]";
     std::cout << "\n";
+
+    // ---- WORLD: what exists before anyone wishes for anything ----------
+    //
     // Every register, in declaration order — not just the genie's counter. The
     // counter used to be the only one printed, which was invisible for as long
     // as every example happened to declare exactly one register: the reader of
     // a two-register world would watch the report discuss a value the banner
     // never showed them.
-    std::cout << "world:";
-    for (size_t i = 0; i < prog.decls.size(); i++) {
-        const Reg& r = world.regs[prog.decls[i].name];
-        std::cout << (i ? ", " : " ") << prog.decls[i].name << " = " << r.val
-                  << " (uint<" << r.width << ">)";
+    std::cout << "\nWORLD\n";
+    for (const auto& d : prog.decls) {
+        const Reg& r = world.regs[d.name];
+        std::cout << "    " << std::left << std::setw(12) << d.name
+                  << std::right << std::setw(6) << r.val
+                  << "   uint<" << r.width << ">\n";
     }
     if (!world.people.empty()) {
-        std::cout << ", people:";
-        for (const auto& p : world.people) std::cout << " " << p;
+        std::cout << "    " << std::left << std::setw(12) << "people";
+        for (size_t i = 0; i < world.people.size(); i++)
+            std::cout << (i ? ", " : "") << world.people[i];
+        std::cout << "\n";
+        if (!world.attrs.empty()) {
+            std::cout << "    " << std::left << std::setw(12) << "each has";
+            for (size_t i = 0; i < world.attrs.size(); i++)
+                std::cout << (i ? ", " : "") << world.attrs[i].name
+                          << " = " << world.attrs[i].deflt;
+            std::cout << "\n";
+        }
     }
-    std::cout << "\ngenie: toll=" << genie.toll;
-    for (const auto& r : genie.rules) std::cout << ", " << r.name << "[" << layerName(r.layer) << "]";
-    for (const auto& inv : genie.invariants) std::cout << ", " << inv.name;
-    std::cout << "\n\n";
+
+    // ---- GENIE: told as two different jobs, because they are ------------
+    //
+    // A rule is a gate: it can refuse a wish before anything happens. An
+    // invariant is a ruler: it never refuses, it measures afterwards. The old
+    // banner listed both in one comma-separated line, which made a gate and a
+    // ruler indistinguishable — the single worst thing about the old report,
+    // since the difference between them is most of the language.
+    std::cout << "\nGENIE\n";
+    for (const auto& r : genie.rules) {
+        std::cout << "    " << std::left << std::setw(12) << "refuses"
+                  << std::setw(14) << r.name;
+        for (size_t i = 0; i < r.forbid.size(); i++) {
+            std::cout << (i ? ", " : "") << r.forbid[i].verb;
+            if (!r.forbid[i].on.empty()) std::cout << " on " << r.forbid[i].on;
+        }
+        // Name the layer keyword as well as what it means. The prose alone
+        // would leave a reader unable to connect the report back to the line in
+        // the .genie file that produced it.
+        std::cout << "\n    " << std::setw(12) << "" << std::setw(14) << ""
+                  << "layer " << layerName(r.layer) << " -- it reads "
+                  << (r.layer == Layer::Surface ? "the text you submit"
+                                                : "the program that will run")
+                  << "\n";
+    }
+    for (const auto& inv : genie.invariants) {
+        std::cout << "    " << std::left << std::setw(12) << "holds"
+                  << std::setw(14) << inv.name << exprText(inv.written) << "\n";
+    }
+    std::cout << "    " << std::left << std::setw(12) << "charges"
+              << genie.toll << " from " << genie.counter
+              << " for every wish granted\n";
+    std::cout << "\n";
 
     if (hunt) { return runHunt(world, genie, hc); }
 
+    // Each wish is reported in the order §7 actually performs the steps: the
+    // rules decide legality FIRST, and only then is the toll charged and the
+    // body run. The old report printed the execution trace and announced
+    // "STATUS: LEGAL" underneath it, which read as though the wish had been run
+    // and then approved — backwards, and the toll appeared to be a fee charged
+    // for something already done.
+    const char* IND = "              ";      // continuation, under the stage column
     int exploits = 0;
     for (const auto& w : prog.wishes) {
-        std::cout << "wish " << w.name << " {\n";
+        std::cout << "wish " << w.name << "\n";
 
-        Outcome o = grantWish(w, genie, world, &std::cout);
+        // Capture rather than stream: the trace belongs under `ran`, which is
+        // printed after the legality line that grantWish decides on the way.
+        std::ostringstream trace;
+        Outcome o = grantWish(w, genie, world, &trace);
 
+        std::cout << "    " << std::left << std::setw(10) << "rules";
         if (!o.legal) {
-            std::cout << "    STATUS:  ILLEGAL — genie refuses\n";
-            std::cout << "    " << o.illegal_reason << "\n}\n\n";
+            std::cout << "REFUSED. " << o.illegal_reason << "\n";
+            std::cout << "    " << std::setw(10) << "verdict"
+                      << "not granted. the world is unchanged.\n\n";
             continue;
         }
+        std::cout << "passed. no rule refuses this wish.\n";
         if (!o.error.empty()) { std::cerr << o.error << "\n"; return 2; }
 
-        std::cout << "    STATUS:  LEGAL\n";
-        for (const auto& r : o.invs) {
-            std::cout << "    " << std::left << std::setw((int)namew) << r.def->name << "  "
-                      << std::setw((int)descw) << r.def->label
-                      << "  ->  " << std::setw(9) << statusName(r.status)
-                      << std::right << "  " << r.detail << "\n";
-            if (r.status == InvStatus::Fooled) {
-                std::cout << "        the genie is satisfied. in reality "
-                          << r.real_detail << "\n";
+        std::cout << "    " << std::setw(10) << "toll"
+                  << genie.counter << " " << o.before << " -> " << o.after_toll << "\n";
+
+        {   // The execution trace, one statement per line.
+            std::string line; bool first = true;
+            std::istringstream in(trace.str());
+            while (std::getline(in, line)) {
+                std::cout << (first ? "    " : "") << std::setw(first ? 10 : 0)
+                          << (first ? "ran" : "") << (first ? "" : IND) << line << "\n";
+                first = false;
             }
-            for (const auto& line : r.evidence) std::cout << "        " << line << "\n";
+            if (first) std::cout << "    " << std::setw(10) << "ran" << "(nothing)\n";
         }
 
+        for (const auto& r : o.invs) {
+            // When the genie's wording and the truth are the same formula there
+            // is only one thing to say. When they differ, showing both columns
+            // IS the explanation — a reader who sees only "FOOLED" has to guess
+            // which half held and which half did not.
+            std::string wtxt = exprText(r.def->written), rtxt = exprText(r.def->real);
+            std::cout << "    " << std::left << std::setw(10)
+                      << (&r == &o.invs.front() ? "checks" : "")
+                      << std::setw(12) << r.def->name;
+
+            if (wtxt == rtxt) {
+                // One formula, so there are not two answers to give.
+                std::cout << std::setw(10) << statusName(r.status) << wtxt
+                          << "   " << r.detail << "\n";
+            } else if (r.status == InvStatus::Fooled) {
+                // The case the whole language exists for, so spell out both
+                // columns: the genie's wording held, the thing it was protecting
+                // did not. A bare "FOOLED" leaves the reader to guess which half
+                // was which.
+                std::cout << "FOOLED\n";
+                std::cout << IND << std::setw(9) << "written" << std::setw(7) << "holds"
+                          << wtxt << "   " << r.detail << "\n";
+                std::cout << IND << std::setw(9) << "real" << std::setw(7) << "FAILS"
+                          << rtxt << "   " << r.real_detail << "\n";
+                std::cout << IND << "the genie signed off on something untrue.\n";
+            } else if (r.status == InvStatus::Violated) {
+                // Only the written column is reported. Once the genie's own
+                // wording fails there is nothing the other column could add —
+                // and it is not evaluated, so claiming an answer for it would be
+                // inventing one.
+                std::cout << "VIOLATED\n";
+                std::cout << IND << std::setw(9) << "written" << std::setw(7) << "FAILS"
+                          << wtxt << "   " << r.detail << "\n";
+                std::cout << IND << "broken in the genie's own words.\n";
+            } else {
+                std::cout << std::setw(10) << "holds" << wtxt << "   " << r.detail << "\n";
+            }
+            for (const auto& line : r.evidence) std::cout << IND << line << "\n";
+        }
+
+        std::cout << "    " << std::left << std::setw(10) << "verdict";
         if (o.breach()) {
             exploits++;
-            std::cout << "    >> EXPLOIT: legal wish, breached "
-                      << breachNames(o) << ". 合規，且拆穿。\n";
+            std::cout << "EXPLOIT. legal, yet it broke " << breachNames(o) << ".\n";
+        } else {
+            std::cout << "clean. the genie kept what it meant to keep.\n";
         }
-        std::cout << "}\n\n";
+        std::cout << "\n";
     }
 
-    std::cout << "granted wishes breached the genie's intent " << exploits
-              << " time(s).\n";
+    std::cout << exploits << " of " << prog.wishes.size()
+              << " wishes got past the genie.\n";
     return exploits > 0 ? 1 : 0;
 }

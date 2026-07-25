@@ -118,8 +118,9 @@ register wishes : uint<2> = 3
 贏的條件不是讓程式報錯，而是讓它同時印出這兩件事：
 
 ```
-STATUS:  LEGAL          你完全遵守了規則
-         VIOLATED       而規則想守住的東西被你破了
+rules     passed. no rule refuses this wish.    ← 你完全遵守了規則
+checks    I2          VIOLATED                  ← 而規則想守住的東西被你破了
+verdict   EXPLOIT. legal, yet it broke I2.
 ```
 
 **合規，且拆穿。** 這條縫——「規則的字面」和「規則的本意」之間——就是整個遊戲。
