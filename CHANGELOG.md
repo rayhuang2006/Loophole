@@ -13,6 +13,11 @@ Releases before 1.1.0 were published under the compiler's old name, `wishc`.
   its value — the reader was told about a number the header never mentioned. It
   stayed invisible for as long as every bundled example happened to declare
   exactly one register. All registers are now listed, in declaration order.
+- **Releases now also carry an unversioned copy of each binary.** The install
+  line in the README points at `releases/latest/download/`, which is the only
+  URL that stays correct across versions — but it resolves to a *filename*, and
+  a filename with the version in it stops existing the moment a new version
+  ships. The versioned copies remain, for checksums and for archiving.
 
 ## loophole 1.1.0 — wish 1.0, genie 1.0
 
