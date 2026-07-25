@@ -99,3 +99,29 @@ jobs:
           ./loophole-san --genie genie/mortal.genie  --hunt examples/08_eternal_sleep.wish --max-stmts 2 --max-wishes 2 >/dev/null || [ $? -eq 1 ]
           ./loophole-san --genie genie/vigil.genie   --hunt examples/04_nobody.wish        --max-stmts 2 --max-wishes 2 >/dev/null || [ $? -eq 1 ]
           ./loophole-san --genie genie/careful.genie --hunt examples/08_eternal_sleep.wish --max-stmts 2 --max-wishes 2 >/dev/null || [ $? -eq 1 ]
+
+  wasm:
+    # The browser build has to judge exactly as the native one does. If it did
+    # not, the playground would be a second implementation of the language that
+    # quietly disagreed with the compiler the specification describes -- and
+    # §9.3 requires two conforming implementations to agree verbatim.
+    #
+    # Nothing here is a golden file: every case runs both builds with the same
+    # arguments and diffs them against each other, so a deliberate change to the
+    # report changes both at once and this job stays quiet.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+          actions-cache-folder: emsdk-cache
+
+      - name: Build both
+        run: |
+          make
+          make wasm
+
+      - name: The two builds must agree
+        run: make wasm-check

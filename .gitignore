@@ -22,6 +22,8 @@ compile_commands.json
 *.exe
 # the compiler binary, once built
 /loophole
+/loophole.node.js
+/loophole.node.wasm
 
 # Debug / profiling
 *.dSYM/

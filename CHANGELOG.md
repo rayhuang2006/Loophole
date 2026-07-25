@@ -6,6 +6,29 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.4.0 — wish 1.0, genie 1.0
+
+**The compiler builds for the browser**, as a step toward a playground: nobody
+learns a language by reading about it, and running one currently costs an
+install, an editor and a terminal. Neither language changed, and the native
+build is byte-identical to 1.3.1 on every example.
+
+- `make wasm` produces a WebAssembly build (447 KB) via Emscripten.
+- **`make wasm-check` is the claim it has to earn**: both builds run the same
+  arguments and their output is diffed against *each other*, never against a
+  golden. A playground that disagreed with the compiler on one verdict, one exit
+  code or one line of a diagnostic would be a second implementation of the
+  language — and §9.3 requires two conforming implementations to agree verbatim.
+  All eight examples, five hunt fingerprints and four diagnostics match. CI runs
+  it.
+- **A diagnostic throws instead of calling `exit()`.** This is what made the
+  browser build possible: `exit()` under wasm tears down the runtime, so a page
+  would have judged exactly one program and then been dead. It is the better
+  shape natively too — the stack now unwinds instead of being abandoned.
+- `main` is a four-line wrapper around `cliMain`, so the exception has one place
+  to be caught and a host that is not a command line has a function to call
+  rather than a process to start.
+
 ## loophole 1.3.1 — wish 1.0, genie 1.0
 
 **A verb that denotes no operation was reported as the genie refusing, and the

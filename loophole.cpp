@@ -66,7 +66,7 @@
 // whichever language grew it. Dependants (an editor plugin, a judge) pin
 // against these.
 // ---------------------------------------------------------------------------
-static const char* COMPILER_VERSION = "1.3.1";
+static const char* COMPILER_VERSION = "1.4.0";
 static const char* WISH_VERSION     = "1.0";
 static const char* GENIE_VERSION    = "1.0";
 
@@ -107,6 +107,13 @@ static std::string jsonEsc(const std::string& in) {
 // ---------------------------------------------------------------------------
 struct Source { std::string name, text; };
 static Source g_src;
+
+// A diagnostic ends the run. It is thrown rather than exited, for two reasons
+// that both outlive the command line: the stack unwinds properly, and a host
+// that judges more than once in a process can catch it and carry on. The
+// browser build is exactly that host — `exit()` there would tear down the whole
+// wasm runtime, so the page would work once and then be dead.
+struct Fatal { int code; };
 
 // Colour only when a human is looking. Escape codes in a pipe would end up in
 // the goldens, in `grep`, and in anything that treats the report as text — so
@@ -161,10 +168,10 @@ static std::string sourceLine(int line) {
     // is also literally true, and it says the thing a reader most needs to
     // know: nothing was judged, so no verdict below means anything.
     if (!note.empty()) std::cerr << "\n" << note << "\n";
-    // Exit 2, never 1. Per §10.1 exit 1 means "judged, and something was an
+    // 2, never 1. Per §10.1 exit 1 means "judged, and something was an
     // exploit" — reporting a syntax error as 1 would tell a script that a file
     // which does not even parse had found a hole in the genie.
-    std::exit(2);
+    throw Fatal{2};
 }
 
 // Edit distance, for "did you mean". The candidates are always derived from a
@@ -2459,7 +2466,10 @@ static void usage() {
         "exit codes:  0 no exploit   1 at least one exploit   2 error\n";
 }
 
-int main(int argc, char** argv) {
+// The command line. Kept separate from `main` so the diagnostic exception has
+// one place to be caught, and so a host that is not a command line has a
+// function to call instead of a process to start.
+static int cliMain(int argc, char** argv) {
     bool hunt = false, as_json = false;
     HuntConfig hc;
     const char* path = nullptr;
@@ -2753,4 +2763,12 @@ int main(int argc, char** argv) {
               << refused << " refused, " << granted << " granted, "
               << exploits << (exploits == 1 ? " exploit." : " exploits.") << "\n";
     return exploits > 0 ? 1 : 0;
+}
+
+int main(int argc, char** argv) {
+    try {
+        return cliMain(argc, argv);
+    } catch (const Fatal& f) {
+        return f.code;
+    }
 }
