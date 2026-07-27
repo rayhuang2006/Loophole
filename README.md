@@ -183,6 +183,23 @@ wish tidy
 
 ---
 
+## 發布怎麼運作
+
+**改 `COMPILER_VERSION` 就是決定要發布。** 其餘全自動：
+
+```
+push 到 main  →  CI 五個 job 全綠  →  版號跟最新的 tag 不同?
+                                          ↓ 是
+                                   自動打 tag + 發布
+```
+
+一般的 commit 不會產生 release，因為版號沒變。而下游（編輯器插件、文法）
+抓的是 release 裡的 `keywords.json`——**一個 curl，不用下載執行檔、不用執行任何東西**：
+
+```bash
+curl -L https://github.com/rayhuang2006/Loophole/releases/latest/download/keywords.json
+```
+
 ## 給工具用的介面
 
 散文報告是給人看的，措辭會變。**要拿 `loophole` 當依賴的話，用這兩個**——
@@ -236,7 +253,7 @@ wish tidy
 | [語言規格 1.0](docs/spec/loophole-1.0.md) | 正式白皮書（英文），模仿 C++/Python 標準的寫法 |
 | [操作語義](docs/SEMANTICS.md) | 精確語義的中文說明。每個指令到底做什麼 |
 | [設計筆記](docs/DESIGN.md) | 為什麼長成這樣，走過哪些彎路 |
-| [願景與全家桶](docs/VISION.md) | 這個專案想長成什麼樣、三個子專案的規劃 |
+| [願景與全家桶](docs/VISION.md) | 這個專案想長成什麼樣、四個子專案的規劃 |
 | [Changelog](CHANGELOG.md) | 每一版改了什麼 |
 
 ---
@@ -256,7 +273,8 @@ wish tidy
 - **v1.6.0** 互動教學，用編譯器當裁判；CI 驗證每關「起始不通過、正解通過」。**done**
 - **v1.7.0** 教學重寫、語法高亮、`--json` 加上 `wrote` 和 `registers`。**done**
 - **v1.8.0** 改成二十八章的課程（九章純閱讀，先講概念再動手），網站改成技術規格書的視覺。**done**
-- **接下來** VSCode 語法高亮（`.wish` 和 `.genie` 各一份文法）、瀏覽器 playground、解題站。
+- **v1.9.0** `--keywords`：關鍵字只剩一份來源，下游從 release 抓；發版自動化。**done**
+- **接下來** VSCode 插件（TextMate + 用 wasm 做診斷）、tree-sitter 文法、解題站。
 
 現在的語言認得 `register` / `attribute` / `people` / `wish` / `define` / `promise`，
 六個操作 `sub` / `add` / `widen` / `set` / `kill` / `revive`，

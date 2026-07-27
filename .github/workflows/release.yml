@@ -64,6 +64,15 @@ jobs:
           file loophole | grep -q 'statically linked' \
             || { echo "::error::the Linux binary is not static"; exit 1; }
 
+      - name: The keyword data, for anything that colours the language
+        # Shipped as a file so a downstream repo needs one `curl` -- no binary
+        # to download, nothing to execute, works on any runner. It is DATA and
+        # not a grammar on purpose: an editor's format is that editor's
+        # business, and putting TextMate's scope names in this repo would mean
+        # every new editor is a change here.
+        if: matrix.target == 'linux-x86_64'
+        run: ./loophole --keywords > keywords.json
+
       - name: Package
         run: |
           version="${{ github.event.inputs.tag || github.ref_name }}"
@@ -81,7 +90,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          path: loophole-*
+          path: |
+            loophole-*
+            keywords.json
 
   publish:
     needs: build

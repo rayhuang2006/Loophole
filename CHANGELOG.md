@@ -8,6 +8,29 @@ Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
 ## loophole 1.9.0 — wish 1.0, genie 1.0
 
+**Releasing is automatic now, because I kept forgetting to do it by hand.** Six
+versions in a row were bumped in the source and never tagged: the compiler said
+1.9.0 while `releases/latest` still pointed at 1.3.1, so anything downstream
+asking for `--keywords` would have got a binary that did not have it.
+
+Bumping `COMPILER_VERSION` is the act of deciding to release. Everything after
+it is mechanical now: CI passes, a job notices the version has no tag, tags it,
+and asks the release workflow to run. An ordinary commit publishes nothing,
+because an ordinary commit does not change the version.
+
+One wrinkle worth recording: **a tag pushed with `GITHUB_TOKEN` does not start
+another workflow.** GitHub blocks that so a run cannot trigger itself forever.
+So the release is requested explicitly by `workflow_dispatch`, which is one of
+the few events that token may raise — and which is why that trigger and its
+`tag` input existed already.
+
+**Releases now carry `keywords.json`.** A downstream repo colouring the language
+needs one `curl`: no binary to download, nothing to execute, any runner. It is
+the DATA and not a grammar on purpose — an editor's format is that editor's
+business, and putting TextMate's scope names in this repo would make every new
+editor a change here.
+
+
 **`--keywords`**, so that nothing has to keep its own copy of what the language
 reserves. The list existed in three places — the lexer, §3 of the specification,
 and the web page's highlighter — and an editor plugin would have made four. That
