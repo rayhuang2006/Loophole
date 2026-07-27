@@ -49,6 +49,7 @@ run: loophole
 # when a change to the output or the semantics is intentional.
 check: loophole
 	@./ci/check.sh
+	@./ci/keywords-check.sh
 
 # Put it on PATH, so it is `loophole a.wish` rather than `./loophole a.wish`.
 wasm: loophole.node.js web/loophole.js

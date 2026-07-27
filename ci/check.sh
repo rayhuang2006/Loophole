@@ -63,6 +63,8 @@ if [ "$UPDATE" = "0" ]; then
   ./loophole examples/00_naive.wish >/dev/null 2>&1; [ $? -eq 0 ] || { echo "FAIL exit code: expected 0 (no exploit)"; rc=1; }
   ./loophole examples/01_humble.wish >/dev/null 2>&1; [ $? -eq 1 ] || { echo "FAIL exit code: expected 1 (exploit)"; rc=1; }
   ./loophole /nonexistent.wish        >/dev/null 2>&1; [ $? -eq 2 ] || { echo "FAIL exit code: expected 2 (missing file)"; rc=1; }
+  ./loophole --keywords | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null \
+    || { echo "FAIL --keywords is not valid JSON"; rc=1; }
   # A syntax error is "could not be judged" = 2, never 1. It used to exit 1,
   # which tells a script that a file that does not even parse had found a hole
   # in the genie -- and this suite only ever checked the missing-file path, so

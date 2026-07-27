@@ -6,6 +6,41 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.9.0 — wish 1.0, genie 1.0
+
+**`--keywords`**, so that nothing has to keep its own copy of what the language
+reserves. The list existed in three places — the lexer, §3 of the specification,
+and the web page's highlighter — and an editor plugin would have made four. That
+kind of copy does not fail loudly when it falls behind: the language grows, and
+the only symptom is a word that quietly stops changing colour.
+
+The output is generated from the tables the lexer and the parser read, so it
+cannot disagree with the compiler. Adding an operation to `OPS` makes it appear
+with nobody editing anything.
+
+- **The wish keywords are a table now**, not an if-else chain, because the lexer
+  and `--keywords` have to read the same thing for that guarantee to hold.
+- **The genie's keywords get a weaker guarantee, and it is worth saying so.**
+  They are contextual — the parser recognises them by name where it expects
+  them — so the table beside them is a declaration, not the thing they read.
+  `ci/keywords-check.sh` compares it against the parser's own call sites; a
+  `word("...")` that is not declared turns CI red. Making that structural would
+  mean an enum and twenty-two rewritten call sites, which is not worth it.
+- **The page no longer has a keyword list at all.** It asks the compiler at
+  load, through the worker. CI checks it has not gone back to a literal one.
+- The check also holds §3 to the compiler: a reserved word the document does not
+  list is a defect in the document.
+
+### A caching bug this uncovered
+
+The worker is never cached and the module is, so for a few minutes after a
+deploy a browser can pair a **new worker with the previous module**. The new
+worker called `M.keywords()`, which that build did not have, and threw before
+posting `ready` — the page sat on "loading" forever with nothing in the console.
+This is the mirror of the bug fixed in 1.6.0, where a cached worker was paired
+with a newer page. The worker now calls the optional function defensively:
+colour is worth degrading, a dead page is not.
+
 ## loophole 1.8.3 — wish 1.0, genie 1.0
 
 Three problems a first-time reader found, none of which the author could see.

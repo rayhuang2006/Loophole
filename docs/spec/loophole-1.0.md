@@ -546,6 +546,7 @@ are, and a dependant may rely on them:
 | exit `2` | error — the input could not be judged |
 | `--json` | machine-readable verdict; the fields below |
 | `--version` | `loophole <compiler>  (wish <wish>, genie <genie>)` |
+| `--keywords` | every reserved word, as JSON, grouped by role |
 
 The `--json` object carries `loophole`, `languages` (an object with `wish` and
 `genie`), `file`, `genie`, `exploits`, and a `wishes` array. The two language
@@ -557,6 +558,13 @@ elements carry `name`, `statement`, `verdict` (`holds` / `violated` / `fooled`),
 
 An implementation MUST derive this from the same judgment that produces the
 prose report, so that the two can never disagree.
+
+`--keywords` reports the reserved words of § 3, grouped: `wish`, `genie`,
+`operations`, `layers`, `expressions`, plus the comment marker and the type
+form. It exists so that a syntax highlighter need not keep a copy of § 3 —
+a copy that would go stale the first time the language grew, with no symptom
+beyond a word quietly losing its colour. An implementation MUST derive it from
+whatever its lexer and parser actually read, not from a separate list.
 
 ---
 

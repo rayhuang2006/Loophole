@@ -66,7 +66,7 @@
 // whichever language grew it. Dependants (an editor plugin, a judge) pin
 // against these.
 // ---------------------------------------------------------------------------
-static const char* COMPILER_VERSION = "1.8.3";
+static const char* COMPILER_VERSION = "1.9.0";
 static const char* WISH_VERSION     = "1.0";
 static const char* GENIE_VERSION    = "1.0";
 
@@ -455,6 +455,24 @@ enum class Tok {
     End
 };
 
+// TABLE — the reserved words of the wish language.
+//
+// One list, read by two things that must never disagree: the lexer, which
+// decides what a word means, and `--keywords`, which tells an editor how to
+// colour it. A highlighter working from its own copy goes stale the moment the
+// language grows, and nothing tells anybody. There is no second copy to update
+// because there is no second copy.
+struct KeywordDef { const char* word; Tok tok; };
+static const KeywordDef WISH_KEYWORDS[] = {
+    { "register",  Tok::KwRegister  },
+    { "attribute", Tok::KwAttribute },
+    { "people",    Tok::KwPeople    },
+    { "wish",      Tok::KwWish      },
+    { "define",    Tok::KwDefine    },
+    { "promise",   Tok::KwPromise   },
+    { "uint",      Tok::KwUint      },
+};
+
 struct Token {
     Tok kind;
     std::string text;
@@ -543,13 +561,8 @@ struct Lexer {
                     t += s[i]; i++;
                 }
                 Tok k = Tok::Ident;
-                if      (t == "register") k = Tok::KwRegister;
-                else if (t == "uint")     k = Tok::KwUint;
-                else if (t == "wish")     k = Tok::KwWish;
-                else if (t == "people")   k = Tok::KwPeople;
-                else if (t == "define")   k = Tok::KwDefine;
-                else if (t == "promise")  k = Tok::KwPromise;
-                else if (t == "attribute") k = Tok::KwAttribute;
+                for (const auto& kw : WISH_KEYWORDS)
+                    if (t == kw.word) { k = kw.tok; break; }
                 out.push_back({k, t, 0, line, c0}); continue;
             }
             // Name the rule, not just the byte. Each of these is a decision
@@ -767,6 +780,27 @@ static const OpDef OPS[] = {
     { "revive", OperandKind::Person,   exec_revive },
 };
 static const int NOPS = (int)(sizeof(OPS) / sizeof(OPS[0]));
+
+// TABLE — the words of the genie language, and the words the expression and
+// formula grammars reserve.
+//
+// These are CONTEXTUAL keywords: the lexer hands them over as plain identifiers
+// and the genie parser recognises them by name at the point it expects them
+// (spec §3). So this table is not what makes them keywords the way
+// WISH_KEYWORDS is -- the parser's `word("counter")` calls are. That is a
+// weaker guarantee and it is worth saying so plainly: this table is checked
+// against those call sites by ci/keywords-check.sh rather than being the thing
+// they read. Adding a `word("...")` without adding it here turns CI red.
+static const char* GENIE_KEYWORDS[] = {
+    "counter", "toll", "concept", "rule", "invariant",
+    "layer", "forbid", "on", "because", "check", "written", "real", "label",
+};
+// The rule layers, and the words the expression / formula grammars reserve.
+static const char* LAYER_WORDS[] = { "surface", "ast" };
+static const char* EXPR_WORDS[]  = {
+    "all", "in", "not", "and", "or", "implies",
+    "granted", "alive", "self", "consistent", "max", "before", "true", "false",
+};
 
 static int opByKeyword(const std::string& k) {
     for (int i = 0; i < NOPS; i++) if (k == OPS[i].keyword) return i;
@@ -2486,6 +2520,44 @@ static int runJson(std::ostream& out, const Program& prog, const Genie& genie,
 }
 
 // ---------------------------------------------------------------------------
+// Everything an editor needs to colour the two languages, taken from the same
+// tables the lexer and the parser read. Nothing here is typed out a second
+// time: add an operation to OPS and it appears below without anyone editing
+// this function, which is the whole reason the flag exists.
+//
+// Grouped rather than flat, because a highlighter wants to colour an operation
+// differently from a declaration, and because CI can then compare group by
+// group instead of one long set.
+static void emitKeywords(std::ostream& out) {
+    auto arr = [&out](const char* name, auto first, auto last, auto get) {
+        out << "  \"" << name << "\": [";
+        for (auto it = first; it != last; ++it)
+            out << (it == first ? "" : ", ") << "\"" << get(*it) << "\"";
+        out << "]";
+    };
+    out << "{\n";
+    arr("wish", std::begin(WISH_KEYWORDS), std::end(WISH_KEYWORDS),
+        [](const KeywordDef& k) { return k.word; });
+    out << ",\n";
+    arr("genie", std::begin(GENIE_KEYWORDS), std::end(GENIE_KEYWORDS),
+        [](const char* w) { return w; });
+    out << ",\n";
+    arr("operations", std::begin(OPS), std::end(OPS),
+        [](const OpDef& o) { return o.keyword; });
+    out << ",\n";
+    arr("layers", std::begin(LAYER_WORDS), std::end(LAYER_WORDS),
+        [](const char* w) { return w; });
+    out << ",\n";
+    arr("expressions", std::begin(EXPR_WORDS), std::end(EXPR_WORDS),
+        [](const char* w) { return w; });
+    out << ",\n";
+    out << "  \"comment\": \"#\",\n";
+    out << "  \"type\": \"uint<N>\",\n";
+    out << "  \"languages\": { \"wish\": \"" << WISH_VERSION
+        << "\", \"genie\": \"" << GENIE_VERSION << "\" }\n";
+    out << "}\n";
+}
+
 static void usage() {
     std::cerr <<
         "usage: loophole [--genie FILE] [--json] <file.wish>\n"
@@ -2524,6 +2596,7 @@ static int cliMain(int argc, char** argv) {
         }
         else if (a == "--json") { as_json = true; }
         else if (a == "--dump-genie") { std::cout << DEFAULT_GENIE; return 0; }
+        else if (a == "--keywords")   { emitKeywords(std::cout); return 0; }
         else if (a == "--genie" && i + 1 < argc) genie_path = argv[++i];
         else if (a == "--hunt") { hunt = true; }
         else if (a == "--max-stmts"  && i + 1 < argc) hc.max_stmts  = std::atoi(argv[++i]);
@@ -2911,6 +2984,9 @@ static Judged judgeSource(const std::string& wish, const std::string& genie,
 }
 
 static std::string defaultGenie() { return DEFAULT_GENIE; }
+static std::string keywordsJson() {
+    std::ostringstream o; emitKeywords(o); return o.str();
+}
 static std::string versions() {
     return std::string(COMPILER_VERSION) + "|" + WISH_VERSION + "|" + GENIE_VERSION;
 }
@@ -2922,6 +2998,7 @@ EMSCRIPTEN_BINDINGS(loophole) {
         .field("json", &Judged::json);
     emscripten::function("judge", &judgeSource);
     emscripten::function("defaultGenie", &defaultGenie);
+    emscripten::function("keywords", &keywordsJson);
     emscripten::function("versions", &versions);
 }
 #endif

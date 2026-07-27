@@ -465,12 +465,19 @@
 
   // ---- syntax highlighting ------------------------------------------
   //
-  // The keyword list is the one in §3 of the specification. It is duplicated
-  // here, which is a real cost: add a keyword to the language and this goes
-  // stale silently. The fix is a `--keywords` flag on the compiler that this
-  // could read at load; until that exists, this comment is what holds the two
-  // together.
-  const KW = /^(register|attribute|people|wish|define|promise|counter|toll|concept|rule|invariant|layer|forbid|on|because|check|written|real|label|surface|ast|all|in|not|and|or|implies|granted|alive|self|consistent|max|before|true|false|sub|add|widen|set|kill|revive)$/;
+  // There is no keyword list here. The compiler emits one — `--keywords`, built
+  // from the same tables the lexer and the parser read — and the worker hands it
+  // over when it starts. A copy kept on this side would go stale the first time
+  // the language grew and the only symptom would be a word quietly losing its
+  // colour.
+  let KW = null;
+  function setKeywords(json) {
+    const d = JSON.parse(json);
+    const all = [].concat(d.wish, d.genie, d.operations, d.layers, d.expressions);
+    // Longest first: `in` must not win over `invariant`.
+    all.sort((a, b) => b.length - a.length);
+    KW = new RegExp('^(' + all.join('|') + ')$');
+  }
 
   function highlight(src) {
     let o = '', i = 0, m;
@@ -482,7 +489,7 @@
       else if (m[2]) o += `<span class="t-str">${esc(t)}</span>`;
       else if (m[3]) o += `<span class="t-type">${esc(t)}</span>`;
       else if (m[4]) o += `<span class="t-num">${esc(t)}</span>`;
-      else if (m[5]) o += KW.test(t) ? `<span class="t-kw">${esc(t)}</span>` : esc(t);
+      else if (m[5]) o += (KW && KW.test(t)) ? `<span class="t-kw">${esc(t)}</span>` : esc(t);
       else           o += `<span class="t-op">${esc(t)}</span>`;
       i = m.index + t.length;
     }
@@ -566,7 +573,11 @@
       if (d.type === 'ready') {
         const [c, w, g] = d.versions.split('|');
         $('ver').textContent = `loophole ${c} · wish ${w} · genie ${g}`;
-        if (!booted) { builtinGenie = d.genie; booted = true; load(0); }
+        if (!booted) {
+          builtinGenie = d.genie;
+          try { setKeywords(d.keywords); } catch (_) { /* colour, not correctness */ }
+          booted = true; load(0);
+        }
         return;
       }
       if (d.id !== pending) return;      // stale reply from before a cancel
