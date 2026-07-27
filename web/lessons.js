@@ -132,9 +132,9 @@ wish experiment_again { sub   wishes, 2          }
     這個網站的每一章，畫面上都有兩塊可以編輯的東西。
 
     <div class="two">
-      <div><span class="tag">左邊　wish</span>
+      <div><span class="tag">wish</span>
         <b>你</b>寫的。一個世界，和你在那個世界裡許的願望。</div>
-      <div><span class="tag">右邊　genie</span>
+      <div><span class="tag">genie</span>
         <b>精靈</b>寫的。它禁止什麼，以及它以為自己守住了什麼。</div>
     </div>
 
@@ -196,7 +196,7 @@ wish experiment_again { sub   wishes, 2          }
 {
   id: 'first-run', act: '一、數字', title: '跑第一次',
   brief: `
-    左邊已經寫好了：一個兩位元的格子，和一個<b>什麼都不做</b>的願望。
+    <b>wish</b> 那一欄已經寫好了：一個兩位元的格子，和一個<b>什麼都不做</b>的願望。
 
     <div class="anno"><b>wish</b> <i>名字</i> { <u>要做的事</u> }</div>
 
@@ -349,7 +349,7 @@ wish humble {
 
     四個位元能裝 0 到 15。<b>先自己算一次</b>：從 2 往回走三步，會走到哪？
 
-    把左邊第一行的 <code>uint&lt;2&gt;</code> 改成 <code>uint&lt;4&gt;</code>。`,
+    把 <b>wish</b> 第一行的 <code>uint&lt;2&gt;</code> 改成 <code>uint&lt;4&gt;</code>。`,
   goal: '讓結果變成 <b>15</b>。',
   wish: `register wishes : uint<2> = 3
 
@@ -371,7 +371,7 @@ wish humble {
 {
   id: 'two-weapons', act: '二、精靈', title: '精靈的兩種武器', read: true,
   brief: `
-    右邊那份檔案<b>沒有一行寫在編譯器裡</b>。它是資料，你等一下就會改它。
+    <b>genie</b> 那一欄<b>沒有一行寫在編譯器裡</b>。它是資料，你等一下就會改它。
 
     精靈手上只有兩種東西，而它們的差別是這整件事的關鍵：
 
@@ -398,7 +398,7 @@ wish humble {
   brief: `
     精靈的第一條戒律：<b>不准許願要更多願望</b>。
 
-    它寫成一條規則，叫 <code>R1</code>（在右邊，往下找 <code>forbid add</code>）。
+    它寫成一條規則，叫 <code>R1</code>——在 <b>genie</b> 裡往下找 <code>forbid add</code>。
 
     <code>add</code> 是加，形狀跟 <code>sub</code> 一模一樣：
 
@@ -424,7 +424,7 @@ wish greedy {
 {
   id: 'unchanged', act: '二、精靈', title: '被擋下的願望不留痕跡',
   brief: `
-    左邊有兩個願望：第一個會被擋，第二個很正常。
+    <b>wish</b> 裡有兩個願望：第一個會被擋，第二個很正常。
 
     <b>按 Run 之前先猜</b>：第二個願望的 <code>toll</code> 會從 <b>3</b> 開始，
     還是從 <b>2</b> 開始？
@@ -519,7 +519,7 @@ wish experiment_again {
 {
   id: 'edit-genie', act: '三、名字', title: '換你當精靈',
   brief: `
-    右邊換成一個<b>很小的精靈</b>了，只有一條規則和一條不變量。規則長這樣：
+    <b>genie</b> 換成一個<b>很小的精靈</b>了，只有一條規則和一條不變量。規則長這樣：
 
     <pre>rule NoAdd {
     layer   surface
@@ -533,10 +533,10 @@ wish experiment_again {
       <b>layer</b> 它讀哪一份程式
     </div>
 
-    左邊是你在第八章寫的下溢。<b>這個精靈擋不住它</b>——它只禁 <code>add</code>。
+    <b>wish</b> 裡是你在第八章寫的下溢。<b>這個精靈擋不住它</b>——它只禁 <code>add</code>。
 
     <b>換你來補。</b>`,
-  goal: '改<b>右邊</b>，讓左邊那個願望被擋下。',
+  goal: '改 <b>genie</b>，讓那個願望被擋下。',
   hint: '把 <code>forbid add</code> 改成 <code>forbid sub</code>。',
   wish: `register wishes : uint<2> = 3
 
@@ -557,7 +557,7 @@ wish humble {
   id: 'define', act: '三、名字', title: '取一個小名',
   brief: `
     先單純試一次 <code>define</code>，<b>還不要想著繞規則</b>。
-    （右邊這個精靈禁的是 <code>add</code>，跟你無關。）
+    （這個精靈禁的是 <code>add</code>，跟你要做的事無關。）
 
     <pre>define 還他 := sub
 還他 wishes, 1</pre>
@@ -584,14 +584,14 @@ wish nickname {
 {
   id: 'alias', act: '三、名字', title: '翻過去',
   brief: `
-    右邊的規則現在<b>禁 <code>sub</code></b>，而且是 <code>layer surface</code>——
+    <b>genie</b> 裡的規則現在<b>禁 <code>sub</code></b>，而且是 <code>layer surface</code>——
     它讀的是<b>你交上來的文字</b>。
 
     它會掃描你寫的每個動詞，看到 <code>sub</code> 這三個字母就擋下。
 
     <p class="lead">那如果它<b>看不到</b>那三個字母呢？</p>
 
-    <b>不要改右邊。</b>`,
+    <b>不要動 genie。</b>`,
   goal: '讓 <code>I2</code> 還是被拆穿。',
   hint: '把上一章的小名招式用上：先 <code>define</code> 綁一個名字，再用它減 3。',
   wish: `register wishes : uint<2> = 3
@@ -620,11 +620,11 @@ wish humble {
       <div><span class="tag">layer ast</span>展開後<b>真正要跑</b>的程式</div>
     </div>
 
-    左邊是你上一章的招式。<b>右邊的規矩一個字都不用改</b>——
+    <b>wish</b> 裡是你上一章的招式。<b>規矩的字一個都不用改</b>——
     一樣禁 <code>sub</code>，一樣的理由。
 
     只要換它<b>讀哪一份</b>。`,
-  goal: '只改<b>右邊一個字</b>，讓左邊被擋下。',
+  goal: '只改 <b>genie</b> 裡的<b>一個字</b>，讓那個願望被擋下。',
   hint: '<code>layer surface</code> → <code>layer ast</code>',
   wish: `register wishes : uint<2> = 3
 
@@ -708,7 +708,7 @@ wish touch {
 `,
   genie: MORTAL,
   pass: j => wrote(j, 'op', 'set'),
-  done: `右邊的精靈換了。它守著 <code>Life</code>，而且<b>寫了兩行</b>——
+  done: `精靈換了。它守著 <code>Life</code>，而且<b>寫了兩行</b>——
          就是上一章講的那兩欄。
 
          它還自己定義了「死」是什麼意思：
@@ -988,12 +988,31 @@ wish w4 { }</pre>
 
     <p class="lead">這就是為什麼最後那個 Hunt 重要：<br>
     如果漏洞是我埋的，機器不可能找到我沒埋的那四種。</p>`,
-  done: `想繼續的話：
+  done: `<b>課程到這裡結束。</b>下面是接下來可以去的地方。
 
-         <b>換一個精靈。</b>右邊那份是資料，寫一個你自己的，
-         再按 Hunt 看它守不守得住。
+         <div class="two">
+           <div><span class="tag">留在這裡</span>
+             回到<b>任何一章</b>改改看。<b>genie</b> 那一欄是資料——
+             寫一個你自己的精靈，再按 <b>Hunt</b>，看機器能不能找到你沒想到的洞。</div>
+           <div><span class="tag">裝到自己電腦上</span>
+             同一個編譯器有 Linux 和 macOS 的執行檔。
+             <a href="https://github.com/rayhuang2006/Loophole/releases/latest">下載</a>，
+             或 <code>git clone</code> 之後 <code>make</code>——一個檔案，沒有任何相依。</div>
+         </div>
 
-         <b>或者去讀規格。</b>這個語言有一份模仿 C++ 標準寫法的白皮書，
-         每一條語義都定義得死死的——那正是「漏洞不是設計出來的」這句話的根據。`,
+         <div class="two">
+           <div><span class="tag">讀那份白皮書</span>
+             <a href="https://github.com/rayhuang2006/Loophole/blob/main/docs/spec/loophole-1.0.md">語言規格</a>
+             模仿 ISO C++ 標準的寫法，每一條語義都釘死。
+             <b>那正是「漏洞不是設計出來的」這句話的根據</b>——
+             你可以自己去查每一招是從哪一條推出來的。</div>
+           <div><span class="tag">看它怎麼做的</span>
+             <a href="https://github.com/rayhuang2006/Loophole">原始碼</a>是一個
+             C++ 檔案，含判決引擎、DPLL、和那個搜尋器。
+             這個網站跑的就是它，編成 WebAssembly。</div>
+         </div>
+
+         最後一件事：你在這裡按的每一次 Run，<b>都沒有離開過你的瀏覽器</b>。
+         沒有伺服器，沒有帳號，沒有任何東西被送到別的地方。`,
 },
 ];

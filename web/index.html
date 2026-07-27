@@ -245,6 +245,14 @@
     text-transform: uppercase; color: var(--seal); margin-bottom: 10px;
   }
   #donebox p { margin: 0 0 11px; } #donebox p:last-child { margin-bottom: 0; }
+  /* The last chapter is the only place with links in the text, and it needs
+     them: a course that ends with no way out of itself has wasted the reader
+     it just finished convincing. */
+  #donebox a, #lesson-brief a {
+    color: var(--ink); text-decoration: underline;
+    text-decoration-color: var(--rule); text-underline-offset: 3px;
+  }
+  #donebox a:hover, #lesson-brief a:hover { text-decoration-color: var(--seal); }
   .onward { margin-top: 15px; }
   .onward button {
     font: 500 12px/1 ui-monospace, Menlo, monospace; letter-spacing: .1em;
@@ -266,9 +274,17 @@
   /* ---- the workspace ---------------------------------------------- */
   #work { display: grid; gap: 22px; grid-template-columns: minmax(0,1fr); }
   @media (min-width: 1080px) { #work { padding-left: 2px; } }
+  /* Stacked, the report comes before the genie. After pressing Run the reader
+     is looking for the verdict, and the built-in genie is fifty lines of
+     reference material that pushed it off the bottom of the screen. Side by
+     side there is no conflict, so the order goes back to source-order. */
+  #pane-report { order: 2; }
+  #pane-genie  { order: 3; }
+
   @media (min-width: 1560px) {
     #work { grid-template-columns: repeat(2, minmax(0,1fr)); column-gap: 22px; }
     #work > .full { grid-column: 1 / -1; }
+    #pane-genie { order: 2; } #pane-report { order: 3; }
   }
   #work.reading { opacity: .42; filter: saturate(.25); transition: opacity .2s; }
 
@@ -305,8 +321,10 @@
     font: 13.5px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace;
     tab-size: 4; white-space: pre; overflow-wrap: normal;
   }
-  .ed pre { min-height: 244px; overflow: auto; pointer-events: none; }
-  .ed.tall pre { min-height: 320px; }
+  /* Height follows the text. A six-line chapter used to sit in a 244px box and
+     push the report off the bottom of the screen -- a reader had to scroll from
+     the top of the page to the bottom to find out what happened. */
+  .ed pre { overflow: auto; pointer-events: none; }
   .ed textarea {
     position: absolute; inset: 0; resize: none; overflow: auto;
     background: transparent; color: transparent; caret-color: var(--rubric);
@@ -405,7 +423,7 @@
       </div>
     </section>
 
-    <section class="pane">
+    <section class="pane" id="pane-genie">
       <div class="panehead">
         <h2>genie — 精靈的規矩</h2>
         <span class="grow"></span>
@@ -418,7 +436,7 @@
       </div>
     </section>
 
-    <section class="pane full">
+    <section class="pane full" id="pane-report">
       <div class="panehead">
         <h2>report — 判決</h2>
         <span class="grow"></span>
@@ -476,7 +494,14 @@
 
   function wire(edId, taId, hlId) {
     const ed = $(edId), ta = $(taId), hl = $(hlId);
-    const paint = () => { hl.innerHTML = highlight(ta.value); };
+    // Six lines minimum so an empty chapter still looks like somewhere to
+    // write, twenty-two maximum so a long genie cannot take over the page.
+    const LH = 21.84, PAD = 30, MIN = 6, MAX = 22;
+    const paint = () => {
+      hl.innerHTML = highlight(ta.value);
+      const n = Math.min(MAX, Math.max(MIN, ta.value.split('\n').length));
+      hl.parentElement.style.height = (n * LH + PAD) + 'px';
+    };
     const sync = () => {
       hl.parentElement.scrollTop = ta.scrollTop;
       hl.parentElement.scrollLeft = ta.scrollLeft;

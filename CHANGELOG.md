@@ -6,6 +6,26 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.8.3 — wish 1.0, genie 1.0
+
+Three problems a first-time reader found, none of which the author could see.
+
+- **The text named positions the layout did not have.** Seventeen places said
+  「左邊」and「右邊」, but the two editors only sit side by side above 1560px;
+  on an ordinary laptop they stack, and every one of those sentences was wrong.
+  They name the panes now — `wish` and `genie` — which is true at any width.
+- **The verdict was below the fold.** The editors had a fixed 244px floor, so a
+  six-line chapter sat in a mostly empty box, and the built-in genie is fifty
+  lines. A reader had to scroll from the top of the page to the bottom to find
+  out what had happened. Editors now size to their text, and while the panes are
+  stacked the report comes before the genie: after pressing Run you are looking
+  for the verdict, and the genie is reference material the report already
+  summarises. Side by side, source order returns.
+- **The course ended without a door.** The last chapter said what it all meant
+  and stopped. It now offers four ways on — stay and rewrite the genie, install
+  the binary, read the specification, read the source — and states plainly that
+  nothing the reader typed ever left their browser.
+
 ## loophole 1.8.2 — wish 1.0, genie 1.0
 
 - **A reading chapter showed two buttons that said the same thing.** Once read,

@@ -190,12 +190,12 @@ wish tidy
 
 ```bash
 ./loophole --json examples/01_humble.wish     # 機器可讀的判決
-./loophole --version                          # loophole 1.8.2  (wish 1.0, genie 1.0)
+./loophole --version                          # loophole 1.8.3  (wish 1.0, genie 1.0)
 ```
 
 ```json
 {
-  "loophole": "1.8.2",
+  "loophole": "1.8.3",
   "languages": { "wish": "1.0", "genie": "1.0" },
   "wishes": [
     { "wish": "humble", "legal": true,
