@@ -6,6 +6,34 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.10.0 — wish 1.0, genie 1.0
+
+Two things a downstream tool needs and could not get.
+
+**`--json` reports the error too.** Until now a failed run produced only prose:
+an editor wanting to draw a squiggle had a line and a column available nowhere
+except a message §10.1 says may be reworded at will. So the only way to get them
+was to scrape the report — the exact mistake that has broken CI once and the
+course's marking once in this project's history. The JSON now carries
+`error.{message,line,column,help,note,source}` on stdout, so a caller has one
+thing to parse whether the run succeeded or not.
+
+**Releases carry the WebAssembly build.** `loophole.js` and `loophole.wasm`, for
+anything that has to judge without a shell — an editor extension, a page. It is
+published rather than left to each consumer because building it needs emsdk, and
+because `make wasm-check` has already proved that this exact artifact judges
+identically to the native compiler.
+
+Neither language changed, and the prose report is byte-identical.
+
+### Walked into the same trap a third time
+
+The new contract check piped `loophole --json` into a validator. `loophole`
+exits 2 there, correctly, and under `set -o pipefail` that becomes the
+pipeline's status — so the check reported failure on perfect JSON. There is a
+comment six lines above the new code warning about exactly this, written the
+first time it happened. Capturing before parsing is the fix, again.
+
 ## loophole 1.9.0 — wish 1.0, genie 1.0
 
 **Releasing is automatic now, because I kept forgetting to do it by hand.** Six

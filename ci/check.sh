@@ -65,6 +65,29 @@ if [ "$UPDATE" = "0" ]; then
   ./loophole /nonexistent.wish        >/dev/null 2>&1; [ $? -eq 2 ] || { echo "FAIL exit code: expected 2 (missing file)"; rc=1; }
   ./loophole --keywords | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null \
     || { echo "FAIL --keywords is not valid JSON"; rc=1; }
+  # A diagnostic must be reachable without reading the prose. An editor drawing a
+  # squiggle needs a line and a column, and §10.1 says the prose may be reworded
+  # freely -- so a consumer scraping it breaks the day someone improves a
+  # message. `--json` therefore reports the error too, on stdout, so a caller has
+  # exactly one thing to parse whether the run succeeded or not.
+  et=$(mktemp -d)
+  printf 'register wishes : uint<2> = 3\nwish x { sub wishes, 1; }\n' > "$et/e.wish"
+  # Captured, not piped. `loophole` exits 2 here because that is the correct code
+  # for "could not be judged", and under `pipefail` that becomes the pipeline's
+  # status -- so a piped version reports failure even when the JSON is perfect.
+  # This is the third time that trap has been walked into in this file; the
+  # warning six lines above did not stop it.
+  ejson=$(./loophole --json "$et/e.wish" 2>/dev/null)
+  printf '%s' "$ejson" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+e = d["error"]
+assert e["line"] == 2, e["line"]
+assert e["column"] == 23, e["column"]
+assert "\x27;\x27" in e["message"], e["message"]
+assert e["help"] and e["source"]
+' 2>/dev/null || { echo "FAIL --json does not report the error structurally"; rc=1; }
+  rm -rf "$et"
   # A syntax error is "could not be judged" = 2, never 1. It used to exit 1,
   # which tells a script that a file that does not even parse had found a hole
   # in the genie -- and this suite only ever checked the missing-file path, so

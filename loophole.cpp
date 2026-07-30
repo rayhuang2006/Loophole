@@ -66,7 +66,7 @@
 // whichever language grew it. Dependants (an editor plugin, a judge) pin
 // against these.
 // ---------------------------------------------------------------------------
-static const char* COMPILER_VERSION = "1.9.0";
+static const char* COMPILER_VERSION = "1.10.0";
 static const char* WISH_VERSION     = "1.0";
 static const char* GENIE_VERSION    = "1.0";
 
@@ -107,6 +107,13 @@ static std::string jsonEsc(const std::string& in) {
 // ---------------------------------------------------------------------------
 struct Source { std::string name, text; };
 static Source g_src;
+
+// Whether a machine asked for the verdict. A diagnostic has to be reachable
+// without reading the prose: an editor drawing a squiggle needs a line and a
+// column, and §10.1 says the prose may be reworded at will -- so a consumer
+// scraping it would break on a better-worded message. Set from argv before any
+// file is read, so every `fail()` below can honour it.
+static bool g_wants_json = false;
 
 // A diagnostic ends the run. It is thrown rather than exited, for two reasons
 // that both outlive the command line: the stack unwinds properly, and a host
@@ -152,6 +159,28 @@ static std::string sourceLine(int line) {
                               const std::string& note =
                                   "no wish was judged. the genie cannot grant "
                                   "what it cannot read.") {
+    if (g_wants_json) {
+        // Instead of the prose, not alongside it: a caller parsing stdout
+        // should have exactly one thing to parse whether the run succeeded or
+        // not. `quoted` is what a caret would have pointed at, so a consumer
+        // can underline the right token without re-lexing the line.
+        std::ostream& o = std::cout;
+        o << "{\n";
+        o << "  \"loophole\": \"" << COMPILER_VERSION << "\",\n";
+        o << "  \"languages\": { \"wish\": \"" << WISH_VERSION
+          << "\", \"genie\": \"" << GENIE_VERSION << "\" },\n";
+        o << "  \"file\": \"" << jsonEsc(g_src.name) << "\",\n";
+        o << "  \"error\": {\n";
+        o << "    \"message\": \"" << jsonEsc(msg) << "\",\n";
+        o << "    \"line\": " << line << ",\n";
+        o << "    \"column\": " << col << ",\n";
+        o << "    \"help\": \"" << jsonEsc(help) << "\",\n";
+        o << "    \"note\": \"" << jsonEsc(note) << "\",\n";
+        o << "    \"source\": \"" << jsonEsc(sourceLine(line)) << "\"\n";
+        o << "  }\n}\n";
+        o.flush();
+        throw Fatal{2};
+    }
     std::string src = sourceLine(line);
     std::string num = std::to_string(line);
     std::string pad(num.size(), ' ');
@@ -2594,7 +2623,7 @@ static int cliMain(int argc, char** argv) {
                       << ", genie " << GENIE_VERSION << ")\n";
             return 0;
         }
-        else if (a == "--json") { as_json = true; }
+        else if (a == "--json") { as_json = g_wants_json = true; }
         else if (a == "--dump-genie") { std::cout << DEFAULT_GENIE; return 0; }
         else if (a == "--keywords")   { emitKeywords(std::cout); return 0; }
         else if (a == "--genie" && i + 1 < argc) genie_path = argv[++i];

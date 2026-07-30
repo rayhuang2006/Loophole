@@ -559,6 +559,14 @@ elements carry `name`, `statement`, `verdict` (`holds` / `violated` / `fooled`),
 An implementation MUST derive this from the same judgment that produces the
 prose report, so that the two can never disagree.
 
+When a run cannot be judged (exit 2), `--json` reports the diagnostic instead of
+the object above: `error` carries `message`, `line`, `column`, `help`, `note` and
+`source` (the offending line). It goes to standard output, so a caller parsing
+that stream has one format to handle whichever way the run went. An
+implementation MUST NOT require a consumer to read the prose to locate an error:
+§10.1 permits the prose to be reworded, so a position obtainable only from it is
+a position no dependant may rely on.
+
 `--keywords` reports the reserved words of § 3, grouped: `wish`, `genie`,
 `operations`, `layers`, `expressions`, plus the comment marker and the type
 form. It exists so that a syntax highlighter need not keep a copy of § 3 —

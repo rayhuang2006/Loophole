@@ -94,8 +94,35 @@ jobs:
             loophole-*
             keywords.json
 
+  # The browser build, for anything that needs to judge without a shell -- an
+  # editor extension drawing squiggles, a page running the course. It is
+  # published rather than left for each consumer to build, because building it
+  # needs emsdk and because `make wasm-check` here has already proved this exact
+  # artifact judges identically to the native one.
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+          actions-cache-folder: emsdk-cache
+      - name: Build and prove it agrees with the native compiler
+        run: |
+          make
+          make wasm
+          make wasm-check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm
+          path: |
+            web/loophole.js
+            web/loophole.wasm
+
   publish:
-    needs: build
+    needs: [build, wasm]
     # Only a tag produces a release. A bare manual run stops after `build`, so
     # the workflow can be tested without publishing anything.
     if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.tag != ''
