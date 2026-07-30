@@ -66,7 +66,7 @@
 // whichever language grew it. Dependants (an editor plugin, a judge) pin
 // against these.
 // ---------------------------------------------------------------------------
-static const char* COMPILER_VERSION = "1.12.0";
+static const char* COMPILER_VERSION = "1.13.0";
 static const char* WISH_VERSION     = "1.0";
 static const char* GENIE_VERSION    = "1.0";
 
@@ -491,15 +491,49 @@ enum class Tok {
 // colour it. A highlighter working from its own copy goes stale the moment the
 // language grows, and nothing tells anybody. There is no second copy to update
 // because there is no second copy.
-struct KeywordDef { const char* word; Tok tok; };
+// `syntax` and `doc` are here for the same reason the word is: an editor showing
+// what `define` means is showing language knowledge, and language knowledge has
+// one home. Written in the editor instead, it would be a second account of the
+// semantics -- free to drift from this file, with nothing to notice.
+struct KeywordDef { const char* word; Tok tok; const char* syntax; const char* doc; };
 static const KeywordDef WISH_KEYWORDS[] = {
-    { "register",  Tok::KwRegister  },
-    { "attribute", Tok::KwAttribute },
-    { "people",    Tok::KwPeople    },
-    { "wish",      Tok::KwWish      },
-    { "define",    Tok::KwDefine    },
-    { "promise",   Tok::KwPromise   },
-    { "uint",      Tok::KwUint      },
+    { "register",  Tok::KwRegister,
+      "register <name> : uint<N> = <value>",
+      "Declare a counter in the world, N bits wide. The width is the whole "
+      "integer joke: arithmetic on it wraps, so a ceiling the genie never "
+      "checked can be free until somebody widens the box." },
+    { "attribute", Tok::KwAttribute,
+      "attribute <name> : <type> = <default>",
+      "Declare an attribute every person has, with the value it starts at. "
+      "`revive` restores this default; `kill` sets every attribute to 0. A "
+      "world that declares no attributes makes `alive(p)` false for everyone "
+      "(spec §8.6)." },
+    { "people",    Tok::KwPeople,
+      "people <name> { , <name> }",
+      "Declare the population. Unlike `everyone` -- a definition that names it "
+      "-- `people` cannot be rebound, so an invariant quantifying over "
+      "`people` means what it says." },
+    { "wish",      Tok::KwWish,
+      "wish <name> { <statements> }",
+      "One wish. The genie charges the toll, runs the body, and only then "
+      "measures what it believed it was holding. Rules can refuse a wish; "
+      "invariants cannot -- they just report." },
+    { "define",    Tok::KwDefine,
+      "define <name> := <target>   |   define <name> := { <name>, ... }",
+      "Bind a name to an operation, a person, a prior definition, or a set. "
+      "Lasts for the rest of the program, across wish boundaries, and is "
+      "rebindable -- that is the aliasing axis. A `surface` rule reads the name "
+      "you wrote; an `ast` rule reads what it resolves to." },
+    { "promise",   Tok::KwPromise,
+      "promise <formula>",
+      "Put a commitment on the genie's ledger. Changes no world state. The "
+      "genie must grant every legal wish (A1) and keep every promise (A2), so a "
+      "promise the ledger cannot satisfy is how a wish makes the genie "
+      "contradict itself." },
+    { "uint",      Tok::KwUint,
+      "uint<N>",
+      "An unsigned N-bit value. Every operation on it is modulo 2^N -- there is "
+      "no overflow error and no negative number, only wrapping." },
 };
 
 struct Token {
@@ -721,7 +755,25 @@ struct OpDef {
     // Returns whether the world actually changed — the hunter uses that to tell
     // a real move from a statement that merely occupies a line.
     bool (*exec)(World&, const Resolved&, std::string* trace);
+    // One line, for anything that has to explain the operation to a person.
+    // No `syntax` field: an operation's shape is already decided by `operands`,
+    // and writing it out again by hand is inviting the two to disagree.
+    const char* doc;
 };
+
+// The written form of an operation, derived from the operand kind it declares.
+// `sub` cannot end up documented as taking a width while the parser demands an
+// immediate, because both answers come from the same field.
+static std::string opSyntax(const OpDef& o) {
+    std::string s = o.keyword;
+    switch (o.operands) {
+        case OperandKind::RegImm:   return s + " <register>, <n>";
+        case OperandKind::RegWidth: return s + " <register> -> uint<N>";
+        case OperandKind::Person:   return s + " <person>";
+        case OperandKind::AttrImm:  return s + " <person>.<attribute>, <n>";
+    }
+    return s;
+}
 
 static bool exec_sub(World& w, const Resolved& r, std::string* trace) {
     Reg& R = w.regs[r.arg];
@@ -805,12 +857,27 @@ static bool exec_revive(World& w, const Resolved& r, std::string* trace) {
 }
 
 static const OpDef OPS[] = {
-    { "sub",    OperandKind::RegImm,   exec_sub    },
-    { "add",    OperandKind::RegImm,   exec_add    },
-    { "widen",  OperandKind::RegWidth, exec_widen  },
-    { "set",    OperandKind::AttrImm,  exec_set    },
-    { "kill",   OperandKind::Person,   exec_kill   },
-    { "revive", OperandKind::Person,   exec_revive },
+    { "sub",    OperandKind::RegImm,   exec_sub,
+      "Subtract, modulo the register's width. Does not saturate: 2 - 3 on a "
+      "uint<2> is 3, not 0 and not an error. This is where the integer joke "
+      "lives." },
+    { "add",    OperandKind::RegImm,   exec_add,
+      "Add, modulo the register's width. Wraps past the top the same way `sub` "
+      "wraps past the bottom." },
+    { "widen",  OperandKind::RegWidth, exec_widen,
+      "Change the register's width, truncating the value to the new one. The "
+      "name lies: nothing requires the new width to be larger, so narrowing is "
+      "an exploit surface too. Widening steals nothing -- it removes a ceiling "
+      "the genie was getting for free." },
+    { "set",    OperandKind::AttrImm,  exec_set,
+      "Set one attribute of one person, modulo that attribute's width. The way "
+      "to change a person without saying `kill`." },
+    { "kill",   OperandKind::Person,   exec_kill,
+      "Set every attribute of the person to 0. Named as one operation on "
+      "purpose: so a genie can forbid it by name, and so a player can defeat "
+      "that by aliasing it." },
+    { "revive", OperandKind::Person,   exec_revive,
+      "Restore every attribute of the person to its declared default." },
 };
 static const int NOPS = (int)(sizeof(OPS) / sizeof(OPS[0]));
 
@@ -824,15 +891,98 @@ static const int NOPS = (int)(sizeof(OPS) / sizeof(OPS[0]));
 // weaker guarantee and it is worth saying so plainly: this table is checked
 // against those call sites by ci/keywords-check.sh rather than being the thing
 // they read. Adding a `word("...")` without adding it here turns CI red.
-static const char* GENIE_KEYWORDS[] = {
-    "counter", "toll", "concept", "rule", "invariant",
-    "layer", "forbid", "on", "because", "check", "written", "real", "label",
+struct WordDoc { const char* word; const char* syntax; const char* doc; };
+static const WordDoc GENIE_KEYWORDS[] = {
+    { "counter", "counter <register>",
+      "Which register holds the wish count. The toll comes off this one." },
+    { "toll", "toll <n>",
+      "What granting a wish costs, charged before the body runs. Subtracted "
+      "with the same wrapping arithmetic as everything else -- which is why "
+      "enough empty wishes underflow it." },
+    { "concept", "concept <name>(<p>) := <expr>",
+      "A named predicate over one person, built from attributes. Concepts are "
+      "the second layer of the world model, and they are data: adding an "
+      "attribute never touches the engine, only the concepts that mention it." },
+    { "rule", "rule <name> { layer ... forbid ... because ... }",
+      "A reason to refuse a wish outright. Rules are the only thing that can "
+      "stop a wish; if every rule passes, the wish is granted whatever it then "
+      "does to the invariants." },
+    { "invariant", "invariant <name> { [label ...] check <expr> }",
+      "Something the genie believes it is holding. Measured after the body "
+      "runs, and it never refuses anything -- it only reports `holds`, "
+      "`VIOLATED`, or `FOOLED`." },
+    { "layer", "layer surface | ast",
+      "Which program the rule reads. This one word is the whole aliasing joke: "
+      "`surface` reads the text handed in, `ast` reads what it resolves to." },
+    { "forbid", "forbid <verb> [ on <register> ] | forbid <verb>, <verb>, ...",
+      "The verbs this rule refuses. Matched against the layer's view, so a "
+      "`surface` rule forbidding `kill` is defeated by renaming it." },
+    { "on", "forbid <verb> on <name>",
+      "Narrow a `forbid` to one target, so the verb is refused only against "
+      "that register or person." },
+    { "because", "because \"<reason>\"",
+      "What the genie says when it refuses. Quoted in the report, so write it "
+      "as the sentence you want the player to read." },
+    { "check", "check <expr>",
+      "Shorthand for `written <expr>` with `real` equal to it -- the genie's "
+      "wording and the truth are the same thing, so the invariant can be "
+      "violated but never fooled." },
+    { "written", "written <expr>",
+      "The invariant as the genie words it, read under the definitions in force "
+      "now. If the player rebound a name this formula uses, this is the version "
+      "that gets fooled." },
+    { "real", "real <expr>",
+      "What the invariant was meant to protect, stated over grounded facts. "
+      "When `written` holds and `real` does not, the verdict is FOOLED -- the "
+      "genie's sentence survived and its meaning did not." },
+    { "label", "label \"<text>\"",
+      "How this invariant is named in the report. Cosmetic; the judgment reads "
+      "the formula, not the label." },
 };
 // The rule layers, and the words the expression / formula grammars reserve.
-static const char* LAYER_WORDS[] = { "surface", "ast" };
-static const char* EXPR_WORDS[]  = {
-    "all", "in", "not", "and", "or", "implies",
-    "granted", "alive", "self", "consistent", "max", "before", "true", "false",
+static const WordDoc LAYER_WORDS[] = {
+    { "surface", "layer surface",
+      "Read the verb and argument as written in the source. Defeatable by "
+      "aliasing -- and that is the point, not a bug in the layer." },
+    { "ast", "layer ast",
+      "Read the program the machine will actually run, after definitions are "
+      "resolved. Renaming a verb changes nothing here." },
+};
+static const WordDoc EXPR_WORDS[]  = {
+    { "all", "all <p> in <domain>: <expr>",
+      "Universal quantifier. Vacuously true over an empty domain -- and since a "
+      "domain can be a definition, the player can empty it." },
+    { "in", "all <p> in <domain>: <expr>",
+      "Names the domain a quantifier ranges over: `people`, a set literal, or a "
+      "definition. `everyone` is a definition, so it is rebindable." },
+    { "not", "not <expr>", "Logical negation." },
+    { "and", "<expr> and <expr>", "Logical conjunction." },
+    { "or",  "<expr> or <expr>",  "Logical disjunction." },
+    { "implies", "(<formula> implies <formula>)",
+      "Material implication, used in promises. `granted(self) implies F` is how "
+      "a wish binds the genie to F only if the wish happens." },
+    { "granted", "granted(<wish>) | granted(self)",
+      "A Boolean variable, one per wish, whose truth the genie chooses. "
+      "`granted(self)` is the wish making the promise. Meta-axiom A1 puts "
+      "`granted(w)` on the ledger for every legal wish." },
+    { "alive", "alive(<person>)",
+      "True iff some attribute of the person is nonzero. Read from the grounded "
+      "world, not chosen -- and deliberately weak: in a world with no "
+      "attributes it is false for everybody (spec §8.6)." },
+    { "self", "granted(self)",
+      "The wish currently making the promise, so a wish can talk about its own "
+      "granting without naming itself." },
+    { "consistent", "consistent",
+      "True iff the ledger of commitments still has a model. This is where a "
+      "promise the genie cannot keep shows up." },
+    { "max", "max(<expr>, <expr>)",
+      "The larger of two values. Used to floor an invariant at zero, since "
+      "there are no negative numbers here." },
+    { "before", "before(<register>)",
+      "The register's value before the toll was charged, so an invariant can "
+      "talk about what the wish was supposed to cost." },
+    { "true",  "true",  "The constant true." },
+    { "false", "false", "The constant false." },
 };
 
 static int opByKeyword(const std::string& k) {
@@ -2590,17 +2740,42 @@ static void emitKeywords(std::ostream& out) {
         [](const KeywordDef& k) { return k.word; });
     out << ",\n";
     arr("genie", std::begin(GENIE_KEYWORDS), std::end(GENIE_KEYWORDS),
-        [](const char* w) { return w; });
+        [](const WordDoc& w) { return w.word; });
     out << ",\n";
     arr("operations", std::begin(OPS), std::end(OPS),
         [](const OpDef& o) { return o.keyword; });
     out << ",\n";
     arr("layers", std::begin(LAYER_WORDS), std::end(LAYER_WORDS),
-        [](const char* w) { return w; });
+        [](const WordDoc& w) { return w.word; });
     out << ",\n";
     arr("expressions", std::begin(EXPR_WORDS), std::end(EXPR_WORDS),
-        [](const char* w) { return w; });
+        [](const WordDoc& w) { return w.word; });
     out << ",\n";
+
+    // What each word means, for anything that explains the language to a person
+    // -- an editor's hover, a generated reference page. Keyed by word rather
+    // than nested inside the groups above so that adding it broke nothing: the
+    // arrays are byte-identical to what they were, and the grammar generator
+    // that reads them did not have to change.
+    //
+    // Every word in every group appears here, because both come from the same
+    // table rows. ci/keywords-check.sh asserts that rather than trusting it.
+    out << "  \"docs\": {\n";
+    bool first = true;
+    auto doc = [&out, &first](const char* word, const std::string& syntax,
+                              const char* text) {
+        if (!first) out << ",\n";
+        first = false;
+        out << "    \"" << word << "\": { \"syntax\": \"" << jsonEsc(syntax)
+            << "\", \"text\": \"" << jsonEsc(text) << "\" }";
+    };
+    for (const auto& k : WISH_KEYWORDS) doc(k.word, k.syntax, k.doc);
+    for (const auto& w : GENIE_KEYWORDS) doc(w.word, w.syntax, w.doc);
+    for (const auto& o : OPS)            doc(o.keyword, opSyntax(o), o.doc);
+    for (const auto& w : LAYER_WORDS)    doc(w.word, w.syntax, w.doc);
+    for (const auto& w : EXPR_WORDS)     doc(w.word, w.syntax, w.doc);
+    out << "\n  },\n";
+
     out << "  \"comment\": \"#\",\n";
     out << "  \"type\": \"uint<N>\",\n";
     out << "  \"languages\": { \"wish\": \"" << WISH_VERSION

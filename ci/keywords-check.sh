@@ -82,5 +82,32 @@ fi
 grep -q 'setKeywords(d.keywords)' web/index.html \
   || fail "the page no longer takes its keywords from the compiler"
 
-[ $rc -eq 0 ] && echo "ok   keywords agree: parser, spec §3, web highlighter"
+# ---- 4. every word is documented ----------------------------------------
+# `docs` is what an editor's hover reads. Both it and the word lists come from
+# the same table rows, so they cannot drift in the compiler -- what this catches
+# is the emitter forgetting a group, which would leave a whole class of words
+# silently unexplained. Checked in both directions: a word with no entry, and an
+# entry for a word that is not reserved.
+printf '%s' "$KW" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+groups = ('wish', 'genie', 'operations', 'layers', 'expressions')
+words = {w for g in groups for w in d[g]}
+docs = d.get('docs', {})
+bad = 0
+for w in sorted(words - set(docs)):
+    print('FAIL keywords: no doc for the reserved word %r' % w); bad = 1
+for w in sorted(set(docs) - words):
+    print('FAIL keywords: docs describe %r, which is not reserved' % w); bad = 1
+for w, v in sorted(docs.items()):
+    if not v.get('syntax') or not v.get('text'):
+        print('FAIL keywords: the doc for %r is empty' % w); bad = 1
+    # An operation's syntax is derived from its operand kind, so it must name the
+    # operand -- a bare verb would mean the derivation returned its fallback.
+    if w in d['operations'] and w == v['syntax']:
+        print('FAIL keywords: %r has no operand in its syntax' % w); bad = 1
+sys.exit(bad)
+" || rc=1
+
+[ $rc -eq 0 ] && echo "ok   keywords agree: parser, spec §3, web highlighter, docs"
 exit $rc

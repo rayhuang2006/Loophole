@@ -6,6 +6,24 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.13.0 — wish 1.0, genie 1.0
+
+**`--keywords` now says what each word means.** It listed the 42 reserved words
+and nothing else, so an editor wanting to show `sub`'s meaning on hover had to
+carry its own prose — a second account of the semantics, free to drift from this
+file with nothing to notice. `docs` maps every word to a `syntax` line and a
+sentence, taken from the same table rows the lexer and parser read.
+
+An operation's `syntax` is **derived** from the `OperandKind` it declares, not
+typed out beside it. `sub` cannot end up documented as taking a width while the
+parser demands an immediate, because both answers come from one field.
+
+Additive on purpose: the five word arrays are byte-identical to what they were,
+so `tools/gen-grammars.mjs` downstream did not have to change. `ci/keywords-check.sh`
+now also asserts that every reserved word has an entry, that no entry describes a
+word that is not reserved, and that an operation's syntax actually names its
+operand — checked by deleting a group and watching it go red.
+
 ## loophole 1.12.0 — wish 1.0, genie 1.0
 
 **A genie can be checked on its own.** `loophole --check-genie mine.genie` reads
