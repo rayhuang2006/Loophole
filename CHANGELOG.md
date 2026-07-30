@@ -6,25 +6,16 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
-## loophole 1.10.0 — wish 1.0, genie 1.0
+## loophole 1.11.0 — wish 1.0, genie 1.0
 
-Two things a downstream tool needs and could not get.
-
-**`--json` reports the error too.** Until now a failed run produced only prose:
-an editor wanting to draw a squiggle had a line and a column available nowhere
-except a message §10.1 says may be reworded at will. So the only way to get them
-was to scrape the report — the exact mistake that has broken CI once and the
-course's marking once in this project's history. The JSON now carries
-`error.{message,line,column,help,note,source}` on stdout, so a caller has one
-thing to parse whether the run succeeded or not.
-
-**Releases carry the WebAssembly build.** `loophole.js` and `loophole.wasm`, for
-anything that has to judge without a shell — an editor extension, a page. It is
-published rather than left to each consumer because building it needs emsdk, and
-because `make wasm-check` has already proved that this exact artifact judges
-identically to the native compiler.
-
-Neither language changed, and the prose report is byte-identical.
+**Every wish reports its line, and every refusal reports which rule and where.**
+`--json` gave a wish's statements a line each but never the wish itself, so a
+wish with an empty body had no position anywhere — and an empty wish is one of
+the sharper exploits here: four of them underflow the toll without asking for
+anything. A refusal was worse; it was a sentence with `(line 9)` inside it, so
+the only way to get the position was to parse prose that §10.1 permits to be
+reworded. Wishes now carry `line`, and a refused one carries
+`refused_by: { rule, line }` beside the sentence. Additive — the sentence stays.
 
 ### Two bugs only the embedded build could have
 
@@ -45,6 +36,30 @@ that it carries the diagnostic's position.
 through `judge()` matches the one the command line makes. `ci/wasm-check.sh`
 could not have: it drives `loophole.node.js`, which is a command line — one
 process, one call, exit — and every failure above needs a second call to appear.
+
+Shipped separately from 1.10.0 because 1.10.0's released WebAssembly build has
+those two bugs in it, and a fix that reuses a version number never reaches
+anybody: the release only fires when `COMPILER_VERSION` changes.
+
+## loophole 1.10.0 — wish 1.0, genie 1.0
+
+Two things a downstream tool needs and could not get.
+
+**`--json` reports the error too.** Until now a failed run produced only prose:
+an editor wanting to draw a squiggle had a line and a column available nowhere
+except a message §10.1 says may be reworded at will. So the only way to get them
+was to scrape the report — the exact mistake that has broken CI once and the
+course's marking once in this project's history. The JSON now carries
+`error.{message,line,column,help,note,source}` on stdout, so a caller has one
+thing to parse whether the run succeeded or not.
+
+**Releases carry the WebAssembly build.** `loophole.js` and `loophole.wasm`, for
+anything that has to judge without a shell — an editor extension, a page. It is
+published rather than left to each consumer because building it needs emsdk, and
+because `make wasm-check` has already proved that this exact artifact judges
+identically to the native compiler.
+
+Neither language changed, and the prose report is byte-identical.
 
 ### Walked into the same trap a third time
 

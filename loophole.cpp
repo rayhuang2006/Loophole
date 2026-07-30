@@ -66,7 +66,7 @@
 // whichever language grew it. Dependants (an editor plugin, a judge) pin
 // against these.
 // ---------------------------------------------------------------------------
-static const char* COMPILER_VERSION = "1.10.0";
+static const char* COMPILER_VERSION = "1.11.0";
 static const char* WISH_VERSION     = "1.0";
 static const char* GENIE_VERSION    = "1.0";
 
@@ -660,7 +660,11 @@ struct Stmt {
     Fml fml;
 };
 
-struct Wish { std::string name; std::vector<Stmt> body; };
+// `line` is the `wish` keyword's line. An editor needs somewhere to put the
+// verdict, and the body cannot always supply it: `wish w { }` has no statements
+// at all, and an empty wish is one of the sharper exploits in the language --
+// four of them underflow the toll without asking for anything.
+struct Wish { std::string name; int line = 0; std::vector<Stmt> body; };
 struct Program {
     std::vector<Decl> decls;
     std::vector<AttrSchema> attrs;
@@ -938,8 +942,9 @@ struct Parser {
             break;
         }
         while (cur().kind == Tok::KwWish) {
-            eat(Tok::KwWish, "'wish'");
             Wish wsh;
+            wsh.line = cur().line;
+            eat(Tok::KwWish, "'wish'");
             wsh.name = eat(Tok::Ident, "wish name").text;
             eat(Tok::LBrace, "'{'");
             while (cur().kind != Tok::RBrace) wsh.body.push_back(parseStmt());
@@ -1510,7 +1515,8 @@ static std::vector<std::string> evidenceFor(const Expr& e, const World& w) {
 // Does this rule refuse the wish? Layer decides which program it reads: the
 // text you handed in, or the one the machine will actually run.
 static bool ruleRefuses(const PolicyRule& r, const Wish& w,
-                        const std::vector<Resolved>& plan, std::string* reason) {
+                        const std::vector<Resolved>& plan, std::string* reason,
+                        int* at = nullptr) {
     for (const auto& res : plan) {
         if (res.is_define || res.is_promise) continue;
         std::string verb, arg;
@@ -1524,6 +1530,7 @@ static bool ruleRefuses(const PolicyRule& r, const Wish& w,
         for (const auto& pat : r.forbid) {
             if (pat.verb != verb) continue;
             if (!pat.on.empty() && pat.on != arg) continue;
+            if (at) *at = res.line;
             if (reason) {
                 *reason = r.name + ": wish invokes '" + verb + "'"
                         + (pat.on.empty() ? "" : " on '" + arg + "'")
@@ -1858,6 +1865,12 @@ struct Outcome {
     bool malformed = false;
     int  fail_line = 0, fail_col = 0;    // where, when malformed
     std::string illegal_reason;
+    // The same refusal, taken apart. `illegal_reason` is a sentence and §10.1
+    // lets sentences be reworded, so a dependant that wanted the line had to
+    // dig "(line 9)" out of prose -- which is the one thing the JSON exists to
+    // make unnecessary.
+    std::string refused_rule;
+    int refused_line = 0;
     bool ran = false;
     std::string error;
     std::vector<InvResult> invs;
@@ -1893,6 +1906,8 @@ Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log
     if (!resolvePlan(w, world, plan, &reason, &how, &o.fail_line, &o.fail_col)) {
         o.legal = false;
         o.illegal_reason = reason;
+        o.refused_rule = (how == ResolveFail::R0Cycle) ? "R0" : "";
+        o.refused_line = o.fail_line;
         o.malformed = (how == ResolveFail::Malformed);
         return o;
     }
@@ -1900,9 +1915,12 @@ Outcome grantWish(const Wish& w, const Genie& g, World& world, std::ostream* log
     // 1) static rules — the genie decides whether to grant at all
     for (const auto& rule : g.rules) {
         std::string why;
-        if (ruleRefuses(rule, w, plan, &why)) {
+        int at = 0;
+        if (ruleRefuses(rule, w, plan, &why, &at)) {
             o.legal = false;
             o.illegal_reason = why;
+            o.refused_rule = rule.name;
+            o.refused_line = at;
             return o;
         }
     }
@@ -2473,10 +2491,13 @@ static void emitWishJson(std::ostream& out, const Wish& w, const Outcome& o,
                          const Genie& g, const World& world) {
     out << "    {\n";
     out << "      \"wish\": \"" << jsonEsc(w.name) << "\",\n";
+    out << "      \"line\": " << w.line << ",\n";
     out << "      \"legal\": " << (o.legal ? "true" : "false") << ",\n";
     emitStmtsJson(out, w);
     if (!o.legal) {
         out << "      \"refused\": \"" << jsonEsc(o.illegal_reason) << "\",\n";
+        out << "      \"refused_by\": { \"rule\": \"" << jsonEsc(o.refused_rule)
+            << "\", \"line\": " << o.refused_line << " },\n";
         out << "      \"invariants\": [],\n";
         out << "      \"exploit\": false,\n      \"breached\": []\n";
         out << "    }";
