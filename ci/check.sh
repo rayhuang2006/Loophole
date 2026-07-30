@@ -114,6 +114,23 @@ assert e["help"] and e["source"]
   printf 'counter wishes\ntoll 1\nrule R { layer nope forbid add }\n' > "$tmp/bad.genie"
   ./loophole --genie "$tmp/bad.genie" examples/01_humble.wish >/dev/null 2>&1
   [ $? -eq 2 ] || { echo "FAIL exit code: a bad genie should be 2"; rc=1; }
+  # A genie checked on its own: parses -> 0 and silent about wishes (there are
+  # none), does not parse -> 2 with the same structured error a wish would get.
+  # This is what lets an editor squiggle a `.genie` nobody has run yet.
+  ok_out="$(./loophole --check-genie genie/mortal.genie)"; [ $? -eq 0 ] \
+    || { echo "FAIL --check-genie: a good genie should exit 0"; rc=1; }
+  case "$ok_out" in *"genie ok"*) ;; *) echo "FAIL --check-genie: no ok line"; rc=1;; esac
+  ./loophole --check-genie genie/mortal.genie 2>&1 | grep -qi 'wish\|invariant .* holds' \
+    && { echo "FAIL --check-genie judged a wish"; rc=1; }
+  printf 'counter wishes\ntoll 1\nrule R\n  layer ast\n' > "$tmp/nobrace.genie"
+  gerr="$(./loophole --json --check-genie "$tmp/nobrace.genie" 2>/dev/null)"
+  [ $? -eq 2 ] || { echo "FAIL --check-genie: a broken genie should exit 2"; rc=1; }
+  printf '%s' "$gerr" | python3 -c '
+import json, sys
+e = json.load(sys.stdin)["error"]
+assert e["line"] and e["column"], e
+assert e["source"], e
+' 2>/dev/null || { echo "FAIL --check-genie: no structured error"; rc=1; }
   # Escape codes must never reach a pipe: the goldens and every grep downstream
   # are plain text.
   if ./loophole "$tmp/lex.wish" 2>&1 | grep -q $'\033'; then

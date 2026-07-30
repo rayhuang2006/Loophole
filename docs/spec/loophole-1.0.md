@@ -567,6 +567,14 @@ implementation MUST NOT require a consumer to read the prose to locate an error:
 §10.1 permits the prose to be reworded, so a position obtainable only from it is
 a position no dependant may rely on.
 
+A genie may be read in isolation with `--check-genie`. This parses the genie and
+reports whether it is well-formed, judging no wishes; a conforming implementation
+MUST NOT require a wish for this. The check is syntactic only: names that a genie
+resolves against the world (§6) — a register a counter or invariant refers to —
+are not in scope here, because the world is not present. Output mirrors a normal
+run: an `error` object on failure, and on success an `ok` object under `--json`
+(exit 0).
+
 `--keywords` reports the reserved words of § 3, grouped: `wish`, `genie`,
 `operations`, `layers`, `expressions`, plus the comment marker and the type
 form. It exists so that a syntax highlighter need not keep a copy of § 3 —

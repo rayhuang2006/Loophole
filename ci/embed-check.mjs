@@ -65,5 +65,24 @@ const judge = (src) => M.judge(src, '', false, false, 0, 0);
     check('and reports the exploit', j.exploits === 1, r.json);
 }
 
+// 4. A genie checked on its own, the entry an editor uses for a `.genie` file
+//    no wish has referenced. Reachable only here -- there is no wish involved,
+//    so `judge()` cannot express it.
+{
+    const good = M.checkGenie(M.defaultGenie());
+    check('a good genie checks out', good.code === 0, good.code);
+    const okj = JSON.parse(good.json);
+    check('a good genie reports no error', okj.error === undefined, good.json);
+    check('and says it is ok', okj.genie && okj.genie.ok === true, good.json);
+
+    // A rule with its brace left off -- the silent case this whole feature is
+    // about.
+    const bad = M.checkGenie('counter wishes\ntoll 1\nrule R\n  layer ast\n');
+    check('a broken genie fails to check', bad.code === 2, bad.code);
+    const e = JSON.parse(bad.json).error;
+    check('and reports where', e && e.line > 0 && e.column > 0, bad.json);
+    check('and quotes the line', /layer ast/.test(e?.source ?? ''), e?.source);
+}
+
 if (!failed) console.log('  ok   embedded api');
 process.exit(failed);

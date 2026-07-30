@@ -66,7 +66,7 @@
 // whichever language grew it. Dependants (an editor plugin, a judge) pin
 // against these.
 // ---------------------------------------------------------------------------
-static const char* COMPILER_VERSION = "1.11.0";
+static const char* COMPILER_VERSION = "1.12.0";
 static const char* WISH_VERSION     = "1.0";
 static const char* GENIE_VERSION    = "1.0";
 
@@ -2612,6 +2612,7 @@ static void usage() {
     std::cerr <<
         "usage: loophole [--genie FILE] [--json] <file.wish>\n"
         "       loophole [--genie FILE] --hunt <file.wish> [--max-stmts N] [--max-wishes N] [--max-imm N]\n"
+        "       loophole --check-genie <file.genie>\n"
         "       loophole --dump-genie | --version\n"
         "\n"
         "  --hunt        ignore the file's wishes; enumerate every wish program within\n"
@@ -2621,6 +2622,8 @@ static void usage() {
         "                invariants are data; the machine is not.\n"
         "  --json        machine-readable verdict. This is the stable contract other\n"
         "                tools depend on; the prose report is not.\n"
+        "  --check-genie FILE  parse a genie on its own and report whether it is\n"
+        "                well-formed. Judges no wishes; syntax only.\n"
         "  --dump-genie  print the built-in genie, so you have a file to edit.\n"
         "  --version     print compiler and language versions.\n"
         "\n"
@@ -2641,6 +2644,7 @@ static int cliMain(int argc, char** argv) {
     HuntConfig hc;
     const char* path = nullptr;
     const char* genie_path = nullptr;
+    const char* check_genie = nullptr;
 
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -2654,6 +2658,7 @@ static int cliMain(int argc, char** argv) {
         else if (a == "--dump-genie") { std::cout << DEFAULT_GENIE; return 0; }
         else if (a == "--keywords")   { emitKeywords(std::cout); return 0; }
         else if (a == "--genie" && i + 1 < argc) genie_path = argv[++i];
+        else if (a == "--check-genie" && i + 1 < argc) check_genie = argv[++i];
         else if (a == "--hunt") { hunt = true; }
         else if (a == "--max-stmts"  && i + 1 < argc) hc.max_stmts  = std::atoi(argv[++i]);
         else if (a == "--max-wishes" && i + 1 < argc) hc.max_wishes = std::atoi(argv[++i]);
@@ -2661,6 +2666,36 @@ static int cliMain(int argc, char** argv) {
         else if (!a.empty() && a[0] == '-') { usage(); return 2; }
         else path = argv[i];
     }
+
+    // Read a genie on its own and say only whether it parses. A genie is the
+    // rules -- someone edits one for a while before any wish exists to run it
+    // against -- so "is this a well-formed genie?" is a question worth answering
+    // without a wish. It is a syntax question and only that: an invariant may
+    // name a register that lives in the wish's world, and whether that register
+    // exists is unknowable from the genie alone (§6). So this parses, and stops.
+    if (check_genie) {
+        std::ifstream gf(check_genie);
+        if (!gf) { std::cerr << "cannot open " << check_genie << "\n"; return 2; }
+        std::stringstream gs; gs << gf.rdbuf();
+        g_src = { check_genie, gs.str() };
+        Genie g = loadGenie(gs.str());   // a parse error throws Fatal from fail()
+        if (g_wants_json) {
+            std::cout << "{\n"
+                      << "  \"loophole\": \"" << COMPILER_VERSION << "\",\n"
+                      << "  \"languages\": { \"wish\": \"" << WISH_VERSION
+                      << "\", \"genie\": \"" << GENIE_VERSION << "\" },\n"
+                      << "  \"file\": \"" << jsonEsc(g_src.name) << "\",\n"
+                      << "  \"genie\": { \"ok\": true, \"rules\": " << g.rules.size()
+                      << ", \"invariants\": " << g.invariants.size()
+                      << ", \"concepts\": " << g.concepts.size() << " }\n"
+                      << "}\n";
+        } else {
+            std::cout << "genie ok  (" << g.rules.size() << " rule(s), "
+                      << g.invariants.size() << " invariant(s))\n";
+        }
+        return 0;
+    }
+
     if (!path) { usage(); return 2; }
     if (hc.max_stmts < 0 || hc.max_wishes < 1 || hc.max_imm < 1) {
         std::cerr << "bad search bound\n"; return 2;
@@ -3042,6 +3077,29 @@ static Judged judgeSource(const std::string& wish, const std::string& genie,
     return r;
 }
 
+// Check a genie on its own, for an editor showing a `.genie` file that no wish
+// has referenced yet. Same `--check-genie` path the command line takes -- one
+// behaviour, so the CLI test covers this too -- and the same two-outcome JSON:
+// an `error` object on a parse failure, an `ok` object otherwise.
+static Judged checkGenieSource(const std::string& genie) {
+    static const char* GENIE_PATH = "playground.genie";
+    { std::ofstream f(GENIE_PATH, std::ios::trunc); f << genie; }
+
+    const char* argv[] = { "loophole", "--json", "--check-genie", GENIE_PATH };
+    std::ostringstream cap;
+    std::streambuf* o = std::cout.rdbuf(cap.rdbuf());
+    std::streambuf* e = std::cerr.rdbuf(cap.rdbuf());
+    Judged r;
+    try { r.code = cliMain(4, const_cast<char**>(argv)); }
+    catch (const Fatal& f) { r.code = f.code; }
+    std::cout.flush();
+    std::cout.rdbuf(o);
+    std::cerr.rdbuf(e);
+    r.output = cap.str();
+    r.json = r.output;
+    return r;
+}
+
 static std::string defaultGenie() { return DEFAULT_GENIE; }
 static std::string keywordsJson() {
     std::ostringstream o; emitKeywords(o); return o.str();
@@ -3056,6 +3114,7 @@ EMSCRIPTEN_BINDINGS(loophole) {
         .field("output", &Judged::output)
         .field("json", &Judged::json);
     emscripten::function("judge", &judgeSource);
+    emscripten::function("checkGenie", &checkGenieSource);
     emscripten::function("defaultGenie", &defaultGenie);
     emscripten::function("keywords", &keywordsJson);
     emscripten::function("versions", &versions);

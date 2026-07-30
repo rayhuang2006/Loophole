@@ -6,6 +6,21 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.12.0 — wish 1.0, genie 1.0
+
+**A genie can be checked on its own.** `loophole --check-genie mine.genie` reads
+a genie and says only whether it parses — nothing about wishes, because there are
+none. Someone edits a genie for a while before any wish exists to run it against,
+and until now a syntax error in that genie was invisible until a wish happened to
+reference it. An editor showing a lone `.genie` had nothing to underline.
+
+It is a syntax check and only that, on purpose. An invariant may name a register
+that lives in the wish's world, and whether that register exists cannot be known
+from the genie alone (§6) — so the check parses the file and stops. A well-formed
+genie exits 0 (`genie ok (N rules, M invariants)`, or an `ok` object under
+`--json`); a malformed one exits 2 with the same structured error a malformed
+wish gets. The embedded build gains `checkGenie(text)` for the same purpose.
+
 ## loophole 1.11.0 — wish 1.0, genie 1.0
 
 **Every wish reports its line, and every refusal reports which rule and where.**
