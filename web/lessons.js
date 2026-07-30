@@ -78,8 +78,12 @@ const verdictIs = (j, v) => granted(j).some(w =>
 // and the values afterwards. Never scraped out of the report.
 const wrote = (j, kind, verb) => granted(j).some(w =>
   (w.wrote || []).some(s => s.kind === kind && (!verb || s.verb === verb)));
+// Register values arrive as strings, exactly, because a uint64 does not survive
+// being a JSON number in a browser -- 18446744073709551615 comes back as
+// ...552000. Compared as strings here so a lesson about the underflow can name
+// the number the underflow actually produces.
 const regIs = (j, name, val) => granted(j).some(w =>
-  w.registers && w.registers[name] === val);
+  w.registers && w.registers[name] && w.registers[name].value === String(val));
 
 const LESSONS = [
 

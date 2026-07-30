@@ -114,6 +114,30 @@ assert e["help"] and e["source"]
   printf 'counter wishes\ntoll 1\nrule R { layer nope forbid add }\n' > "$tmp/bad.genie"
   ./loophole --genie "$tmp/bad.genie" examples/01_humble.wish >/dev/null 2>&1
   [ $? -eq 2 ] || { echo "FAIL exit code: a bad genie should be 2"; rc=1; }
+  # A register value must survive being read by JavaScript. It is a uint64 and a
+  # JSON *number* is a double to every browser there is, so the exact result of
+  # the wrapping subtraction -- the one number this language exists to produce --
+  # would come back as 18446744073709552000. Asserted through `node`, not
+  # python3, because python's ints are arbitrary precision and would pass while
+  # every actual consumer failed.
+  if command -v node >/dev/null; then
+    rj="$(./loophole --json examples/07_the_original.wish)"
+    printf '%s' "$rj" | node -e '
+let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+  const d = JSON.parse(s);
+  const last = d.wishes[d.wishes.length - 1].registers.wishes;
+  if (typeof last.value !== "string") {
+    console.log("FAIL --json register value is not a string"); process.exit(1);
+  }
+  if (last.value !== "18446744073709551615") {
+    console.log("FAIL --json lost the exact value: " + last.value); process.exit(1);
+  }
+  if (last.width !== 64) {
+    console.log("FAIL --json reports width " + last.width + ", not the widened 64");
+    process.exit(1);
+  }
+});' || rc=1
+  fi
   # A genie checked on its own: parses -> 0 and silent about wishes (there are
   # none), does not parse -> 2 with the same structured error a wish would get.
   # This is what lets an editor squiggle a `.genie` nobody has run yet.

@@ -66,7 +66,7 @@
 // whichever language grew it. Dependants (an editor plugin, a judge) pin
 // against these.
 // ---------------------------------------------------------------------------
-static const char* COMPILER_VERSION = "1.13.0";
+static const char* COMPILER_VERSION = "1.14.0";
 static const char* WISH_VERSION     = "1.0";
 static const char* GENIE_VERSION    = "1.0";
 
@@ -2670,11 +2670,26 @@ static void emitWishJson(std::ostream& out, const Wish& w, const Outcome& o,
     // from cannot be checked by anything downstream -- a lesson about what `sub`
     // does needs to see what `sub` did, and the alternative is parsing it back
     // out of the prose the contract says may be reworded at will.
+    //
+    // Each register reports `value` and `width`, and the value is a STRING.
+    // Both of those are deliberate and both fix a defect:
+    //
+    // A register is a uint64. JSON numbers are read as IEEE-754 doubles by every
+    // JavaScript consumer there is, and doubles run out of integers at 2^53 --
+    // so `18446744073709551615`, the exact number the integer joke produces,
+    // came back as `18446744073709552000`. The contract was quietly handing out
+    // wrong numbers in precisely the case this language exists to demonstrate.
+    // A string is exact, and it is what everything else does with 64-bit ints.
+    //
+    // And `width` has to be here because it is not a constant: `widen` changes
+    // it. A consumer that read the declared width out of the source would show
+    // `uint<2>` for a register that has been 64 bits wide for two wishes.
     out << "      \"registers\": {";
     bool firstReg = true;
     for (const auto& kv : world.regs) {
-        out << (firstReg ? " " : ", ") << "\"" << jsonEsc(kv.first) << "\": "
-            << kv.second.val;
+        out << (firstReg ? " " : ", ") << "\"" << jsonEsc(kv.first)
+            << "\": { \"value\": \"" << kv.second.val
+            << "\", \"width\": " << kv.second.width << " }";
         firstReg = false;
     }
     out << " },\n";

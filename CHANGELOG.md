@@ -6,6 +6,37 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.14.0 — wish 1.0, genie 1.0
+
+**Breaking, and it fixes a wrong answer.** `--json` reported each register as a
+bare number:
+
+```json
+"registers": { "wishes": 18446744073709551615 }
+```
+
+JSON numbers are read as IEEE-754 doubles by every JavaScript consumer there is,
+and doubles run out of integers at 2^53. So that value came back as
+`18446744073709552000` — the contract was quietly handing out a wrong number in
+*precisely* the case this language exists to demonstrate. Nothing failed, because
+the only consumers so far compared small values.
+
+Registers now report an object, and the value is a string:
+
+```json
+"registers": { "wishes": { "value": "18446744073709551615", "width": 64 } }
+```
+
+`width` is in there for a second reason: it is not a constant. `widen` changes
+it, so a consumer that read the declared width out of the source would print
+`uint<2>` for a register that has been 64 bits wide for two wishes — which is the
+same class of confidently-stated falsehood.
+
+One break rather than two, since both defects live in the same field. Downstream:
+`web/lessons.js` compares `.value` as a string, and `ci/check.sh` asserts the
+exact digits **through `node`** — python3 would have passed on arbitrary-precision
+ints while every real consumer failed.
+
 ## loophole 1.13.0 — wish 1.0, genie 1.0
 
 **`--keywords` now says what each word means.** It listed the 42 reserved words

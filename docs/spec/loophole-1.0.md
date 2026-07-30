@@ -556,6 +556,14 @@ file; a duplicate key would make the object ambiguous. Each element carries `wis
 elements carry `name`, `statement`, `verdict` (`holds` / `violated` / `fooled`),
 `detail`, and — when the verdict is `fooled` — `reality`.
 
+A granted wish also carries `registers`: an object keyed by register name, whose
+values are objects with `value` and `width`. `value` is a **string** of decimal
+digits, not a number. A register is 64 bits wide and a JSON number is read as a
+double by most consumers, which cannot represent integers above 2^53 — so the
+exact result of a wrapping subtraction, the very thing this language exists to
+show, could not be transmitted as a number without being corrupted. `width` is
+reported per wish because `widen` changes it (§6).
+
 An implementation MUST derive this from the same judgment that produces the
 prose report, so that the two can never disagree.
 
