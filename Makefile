@@ -70,6 +70,7 @@ wasm: loophole.node.js web/loophole.js
 # sources it in a fresh shell -- so this is not a CI workaround.
 wasm-check: loophole loophole.node.js web/loophole.js
 	@./ci/wasm-check.sh
+	@sh -c 'node ci/embed-check.mjs'
 	@sh -c 'node ci/lessons-check.mjs'
 
 install: loophole

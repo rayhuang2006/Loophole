@@ -26,6 +26,26 @@ identically to the native compiler.
 
 Neither language changed, and the prose report is byte-identical.
 
+### Two bugs only the embedded build could have
+
+Both were found while wiring an editor up to `judge()`, and neither is reachable
+from a terminal.
+
+`cliMain` never reset `g_wants_json`. The command line calls it once per process,
+so the flag being sticky costs nothing there — but the embedded build calls it
+twice per judgment, the second time with `--json`, so from the second judgment
+onward a *prose* run that hit an error answered in JSON. The build with no
+terminal to notice it in was the only build that had it.
+
+And `judgeSource` dropped the JSON whenever the run failed (`if (r.code != 2)`),
+which was right when a failed run's JSON was empty and is exactly backwards now
+that it carries the diagnostic's position.
+
+`ci/embed-check.mjs` now holds both, plus the property that a judgment made
+through `judge()` matches the one the command line makes. `ci/wasm-check.sh`
+could not have: it drives `loophole.node.js`, which is a command line — one
+process, one call, exit — and every failure above needs a second call to appear.
+
 ### Walked into the same trap a third time
 
 The new contract check piped `loophole --json` into a validator. `loophole`

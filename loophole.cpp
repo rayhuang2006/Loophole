@@ -2611,6 +2611,12 @@ static void usage() {
 // function to call instead of a process to start.
 static int cliMain(int argc, char** argv) {
     bool hunt = false, as_json = false;
+    g_wants_json = false;
+    // Reset, not just initialise. The command line calls this once per process,
+    // but the embedded build calls it repeatedly -- twice per judgment -- and a
+    // `--json` run leaving this set would make the next prose run answer an
+    // error in JSON. Only the embedded build can see that, which is the build
+    // with no terminal to notice it in.
     HuntConfig hc;
     const char* path = nullptr;
     const char* genie_path = nullptr;
@@ -3007,7 +3013,10 @@ static Judged judgeSource(const std::string& wish, const std::string& genie,
         std::cout.flush();
         std::cout.rdbuf(jo);
         std::cerr.rdbuf(je);
-        if (r.code != 2) r.json = jcap.str();
+        // Kept even when the run failed. Until 1.10.0 there was nothing in
+        // there worth keeping; now it carries the diagnostic's position, and an
+        // editor drawing a squiggle needs it on exactly this path.
+        r.json = jcap.str();
     }
     return r;
 }
