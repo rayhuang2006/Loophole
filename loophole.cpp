@@ -66,7 +66,7 @@
 // whichever language grew it. Dependants (an editor plugin, a judge) pin
 // against these.
 // ---------------------------------------------------------------------------
-static const char* COMPILER_VERSION = "1.14.0";
+static const char* COMPILER_VERSION = "1.15.0";
 static const char* WISH_VERSION     = "1.0";
 static const char* GENIE_VERSION    = "1.0";
 
@@ -699,12 +699,57 @@ struct Stmt {
 // at all, and an empty wish is one of the sharper exploits in the language --
 // four of them underflow the toll without asking for anything.
 struct Wish { std::string name; int line = 0; std::vector<Stmt> body; };
+// What the parser saw declared, and where. A side channel: nothing else reads
+// it and no existing structure changed to carry it, which is why `people` can
+// stay a plain vector of names.
+//
+// It exists because an editor's outline and its "go to definition" need
+// positions, and the alternative -- a regular expression in the editor -- would
+// have to resolve `define mercy := kill` to know what `mercy` is. That is the
+// aliasing axis, the thing this language is about, and it belongs to the
+// compiler.
+//
+// Columns are deliberately absent. The name and the line are enough for a caller
+// to find the column by searching that one line for that one word, which is a
+// safe thing to do with a string you were handed; recording it here would be
+// another field to keep correct for no gain.
+struct Symbol {
+    std::string kind;      // register | attribute | person | wish | define
+                           // rule | invariant | concept
+    std::string name;
+    int line = 0;
+    int end_line = 0;      // the closing brace, for things with a body
+    std::string detail;    // uint<N>, or what a define binds to
+    std::string parent;    // the wish a define was made in
+};
+
 struct Program {
     std::vector<Decl> decls;
     std::vector<AttrSchema> attrs;
     std::vector<std::string> people;
     std::vector<Wish> wishes;
+    std::vector<Symbol> symbols;
 };
+
+// What was declared and where, for an outline and for "go to definition".
+// Emitted for both languages by the same function because a symbol is a symbol.
+static void emitSymbols(std::ostream& out, const std::vector<Symbol>& syms,
+                        const char* indent) {
+    out << indent << "\"symbols\": [";
+    for (size_t i = 0; i < syms.size(); i++) {
+        const Symbol& sy = syms[i];
+        out << (i ? ",\n" : "\n") << indent << "  { \"kind\": \"" << sy.kind
+            << "\", \"name\": \"" << jsonEsc(sy.name)
+            << "\", \"line\": " << sy.line
+            << ", \"endLine\": " << (sy.end_line ? sy.end_line : sy.line);
+        if (!sy.detail.empty())
+            out << ", \"detail\": \"" << jsonEsc(sy.detail) << "\"";
+        if (!sy.parent.empty())
+            out << ", \"parent\": \"" << jsonEsc(sy.parent) << "\"";
+        out << " }";
+    }
+    out << (syms.empty() ? "]" : ("\n" + std::string(indent) + "]"));
+}
 
 // ---------------------------------------------------------------------------
 // TABLE 1 — the operations.
@@ -1061,6 +1106,7 @@ struct Parser {
         Program prog;
         for (;;) {
             if (cur().kind == Tok::KwRegister) {
+                int line = cur().line;
                 eat(Tok::KwRegister, "'register'");
                 std::string name = eat(Tok::Ident, "register name").text;
                 eat(Tok::Colon, "':'");
@@ -1068,9 +1114,12 @@ struct Parser {
                 eat(Tok::Eq, "'='");
                 uint64_t init = eat(Tok::Int, "initial value").num;
                 prog.decls.push_back({name, w, init});
+                prog.symbols.push_back({ "register", name, line, line,
+                                         "uint<" + std::to_string(w) + ">", "" });
                 continue;
             }
             if (cur().kind == Tok::KwAttribute) {
+                int line = cur().line;
                 eat(Tok::KwAttribute, "'attribute'");
                 std::string name = eat(Tok::Ident, "attribute name").text;
                 eat(Tok::Colon, "':'");
@@ -1078,12 +1127,20 @@ struct Parser {
                 eat(Tok::Eq, "'='");
                 uint64_t init = eat(Tok::Int, "default value").num;
                 prog.attrs.push_back({name, w, init & Reg::mask_for(w)});
+                prog.symbols.push_back({ "attribute", name, line, line,
+                                         "uint<" + std::to_string(w) + ">", "" });
                 continue;
             }
             if (cur().kind == Tok::KwPeople) {
                 eat(Tok::KwPeople, "'people'");
                 for (;;) {
-                    prog.people.push_back(eat(Tok::Ident, "a person's name").text);
+                    // Each name keeps its own line: `people` may wrap, and an
+                    // outline that put them all on the first one would jump to
+                    // the wrong place for everybody after the break.
+                    int line = cur().line;
+                    std::string who = eat(Tok::Ident, "a person's name").text;
+                    prog.people.push_back(who);
+                    prog.symbols.push_back({ "person", who, line, line, "", "" });
                     if (cur().kind != Tok::Comma) break;
                     p++;
                 }
@@ -1098,7 +1155,18 @@ struct Parser {
             wsh.name = eat(Tok::Ident, "wish name").text;
             eat(Tok::LBrace, "'{'");
             while (cur().kind != Tok::RBrace) wsh.body.push_back(parseStmt());
+            int close = cur().line;
             eat(Tok::RBrace, "'}'");
+            prog.symbols.push_back({ "wish", wsh.name, wsh.line, close, "", "" });
+            for (const Stmt& st : wsh.body) {
+                if (st.kind != StmtKind::Define) continue;
+                // `detail` is what the name was bound to. For an editor this is
+                // the whole point of jumping to a definition here: you follow
+                // `mercy` and find out it means `kill`.
+                std::string target = st.target_is_set ? "{...}" : st.target_name;
+                prog.symbols.push_back({ "define", st.defname, st.line, st.line,
+                                         target, wsh.name });
+            }
             prog.wishes.push_back(std::move(wsh));
         }
         if (cur().kind != Tok::End) die("trailing tokens");
@@ -1355,6 +1423,7 @@ struct PolicyConcept {
 };
 
 struct Genie {
+    std::vector<Symbol> symbols;      // what was declared, and where (see Symbol)
     std::string counter = "wishes";
     uint64_t toll = 1;
     std::vector<PolicyConcept> concepts;
@@ -1905,6 +1974,7 @@ struct PolicyParser {
             if (word("toll"))    { p++; g.toll = eat(Tok::Int, "an integer").num; continue; }
 
             if (word("concept")) {
+                int line = cur().line;
                 p++;
                 PolicyConcept pc;
                 pc.name = name("a concept name");
@@ -1913,11 +1983,14 @@ struct PolicyParser {
                 eat(Tok::RParen, "')'");
                 eat(Tok::ColonEq, "':='");
                 pc.body = parseExpr();
+                g.symbols.push_back({ "concept", pc.name, line, line,
+                                      pc.param, "" });
                 g.concepts.push_back(std::move(pc));
                 continue;
             }
 
             if (word("rule")) {
+                int line = cur().line;
                 p++;
                 PolicyRule r;
                 r.name = name("a rule name");
@@ -1950,12 +2023,17 @@ struct PolicyParser {
                         die("expected layer / forbid / because");
                     }
                 }
+                int close = cur().line;
                 eat(Tok::RBrace, "'}'");
+                g.symbols.push_back({ "rule", r.name, line, close,
+                                      r.layer == Layer::Surface ? "surface" : "ast",
+                                      "" });
                 g.rules.push_back(std::move(r));
                 continue;
             }
 
             if (word("invariant")) {
+                int line = cur().line;
                 p++;
                 PolicyInvariant inv;
                 inv.name = name("an invariant name");
@@ -1974,6 +2052,9 @@ struct PolicyParser {
                 if (!has_real) inv.real = inv.written;
                 if (inv.label.empty()) inv.label = exprText(inv.written);
                 collectReads(inv.written, inv.reads);
+                // `p - 1` is the '}' this block just consumed.
+                g.symbols.push_back({ "invariant", inv.name, line,
+                                      t[p - 1].line, inv.label, "" });
                 g.invariants.push_back(std::move(inv));
                 continue;
             }
@@ -2718,6 +2799,8 @@ static int runJson(std::ostream& out, const Program& prog, const Genie& genie,
         << "\", \"genie\": \"" << GENIE_VERSION << "\" },\n";
     out << "  \"file\": \"" << jsonEsc(path) << "\",\n";
     out << "  \"genie\": \"" << jsonEsc(genie_path ? genie_path : "(built-in)") << "\",\n";
+    emitSymbols(out, prog.symbols, "  ");
+    out << ",\n";
     out << "  \"wishes\": [\n";
 
     int exploits = 0;
@@ -2877,8 +2960,9 @@ static int cliMain(int argc, char** argv) {
                       << "  \"file\": \"" << jsonEsc(g_src.name) << "\",\n"
                       << "  \"genie\": { \"ok\": true, \"rules\": " << g.rules.size()
                       << ", \"invariants\": " << g.invariants.size()
-                      << ", \"concepts\": " << g.concepts.size() << " }\n"
-                      << "}\n";
+                      << ", \"concepts\": " << g.concepts.size() << " },\n";
+            emitSymbols(std::cout, g.symbols, "  ");
+            std::cout << "\n}\n";
         } else {
             std::cout << "genie ok  (" << g.rules.size() << " rule(s), "
                       << g.invariants.size() << " invariant(s))\n";

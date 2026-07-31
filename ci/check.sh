@@ -138,6 +138,44 @@ let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
   }
 });' || rc=1
   fi
+  # Symbols: what was declared, and where. An editor's outline and its "go to
+  # definition" need positions, and the only alternative -- a regex in the editor
+  # -- would have to resolve `define mercy := kill` to say what `mercy` is. That
+  # is the aliasing axis, so it belongs here.
+  if command -v python3 >/dev/null; then
+    # Captured, not piped. This file has an exploit in it, so `loophole` exits 1
+    # -- correctly -- and under `pipefail` that becomes the pipeline's status.
+    # Fourth time in this file. The warning is thirty lines up.
+    syms_out=$(./loophole --json examples/08_eternal_sleep.wish 2>/dev/null)
+    printf '%s' "$syms_out" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+src = open(d["file"]).read().split("\n")
+by = {}
+for s in d["symbols"]:
+    by.setdefault(s["kind"], []).append(s)
+    assert s["line"] > 0 and s["endLine"] >= s["line"], s
+    # The strong one: the line a symbol claims must actually contain its name.
+    # Counting symbols proves nothing -- a parser that recorded every `people`
+    # entry as line 1 still produces the right number of them.
+    assert s["name"] in src[s["line"] - 1], (s, src[s["line"] - 1])
+for kind in ("register", "attribute", "person", "wish", "define"):
+    assert kind in by, "no %s symbol" % kind
+assert len(by["person"]) == 2, by["person"]
+# A wish spans its body, or an outline cannot fold it.
+assert any(s["endLine"] > s["line"] for s in by["wish"]), by["wish"]
+# The whole reason go-to-definition is worth having in this language.
+dfn = by["define"][0]
+assert dfn["name"] == "mercy" and dfn["detail"] == "kill", dfn
+assert dfn["parent"] == "tidy", dfn
+' 2>/dev/null || { echo "FAIL --json symbols are wrong"; rc=1; }
+
+    ./loophole --json --check-genie genie/mortal.genie | python3 -c '
+import json, sys
+kinds = {s["kind"] for s in json.load(sys.stdin)["symbols"]}
+assert kinds == {"concept", "rule", "invariant"}, kinds
+' 2>/dev/null || { echo "FAIL --check-genie symbols are wrong"; rc=1; }
+  fi
   # A genie checked on its own: parses -> 0 and silent about wishes (there are
   # none), does not parse -> 2 with the same structured error a wish would get.
   # This is what lets an editor squiggle a `.genie` nobody has run yet.

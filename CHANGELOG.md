@@ -6,6 +6,45 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.15.0 — wish 1.0, genie 1.0
+
+**`--json` and `--check-genie` report what was declared, and where.** A `symbols`
+array: registers, attributes, people, wishes and definitions for a `.wish`;
+concepts, rules and invariants for a `.genie`. Each carries `line`, `endLine`,
+and a `detail` — a register's width, a rule's layer, and for a definition, the
+name it binds to.
+
+It is here rather than in an editor because of one entry:
+
+```json
+{ "kind": "define", "name": "mercy", "line": 24, "detail": "kill", "parent": "tidy" }
+```
+
+An outline needs positions, and so does "go to definition" — but a regular
+expression in an editor could not say what `mercy` is without resolving
+`define mercy := kill`. That resolution is the aliasing axis, which is half the
+point of the language, and it is not something a second implementation should be
+doing.
+
+Recorded by the parser as a side channel: no existing structure changed, so
+`people` stays a plain vector of names. Columns are deliberately absent — the
+name and the line let a caller find the column by searching that one line for
+that one word, and a column here would be another field to keep correct for
+nothing.
+
+The check on this asserts the property that matters rather than counting things:
+**every symbol's line must actually contain its name**, read back out of the
+source file. Counting proves nothing — a parser recording every `people` entry as
+line 1 still produces the right number of them, which is exactly the bug the
+first version of the check failed to catch.
+
+### The same trap, a fourth time
+
+The new check piped `loophole --json` into a validator, on a file that contains
+an exploit, so `loophole` exits 1 — correctly — and `pipefail` turned that into a
+failed pipeline. There are now two comments in `ci/check.sh` warning about this,
+one of them thirty lines above the new code.
+
 ## loophole 1.14.0 — wish 1.0, genie 1.0
 
 **Breaking, and it fixes a wrong answer.** `--json` reported each register as a

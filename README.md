@@ -207,13 +207,13 @@ curl -L https://github.com/rayhuang2006/Loophole/releases/latest/download/keywor
 
 ```bash
 ./loophole --json examples/01_humble.wish     # 機器可讀的判決
-./loophole --version                          # loophole 1.14.0  (wish 1.0, genie 1.0)
+./loophole --version                          # loophole 1.15.0  (wish 1.0, genie 1.0)
 ./loophole --keywords                         # 語言保留字，給編輯器上色用
 ```
 
 ```json
 {
-  "loophole": "1.14.0",
+  "loophole": "1.15.0",
   "languages": { "wish": "1.0", "genie": "1.0" },
   "wishes": [
     { "wish": "humble", "legal": true,

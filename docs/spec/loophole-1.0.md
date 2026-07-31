@@ -564,6 +564,15 @@ exact result of a wrapping subtraction, the very thing this language exists to
 show, could not be transmitted as a number without being corrupted. `width` is
 reported per wish because `widen` changes it (§6).
 
+Both `--json` and `--check-genie` also report `symbols`: an array describing what
+the source declared. Each entry carries `kind`, `name`, `line`, `endLine`, and
+optionally `detail` and `parent`. The kinds are `register`, `attribute`,
+`person`, `wish` and `define` for a program, and `concept`, `rule` and
+`invariant` for a genie. `line` MUST be a line on which the declared name
+appears. This is reported by the implementation rather than left to a consumer,
+because resolving a name to what it denotes (§7.2) is the implementation's work
+and a definition's `detail` is exactly that resolution.
+
 An implementation MUST derive this from the same judgment that produces the
 prose report, so that the two can never disagree.
 
