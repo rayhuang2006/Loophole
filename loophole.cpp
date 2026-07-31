@@ -66,7 +66,7 @@
 // whichever language grew it. Dependants (an editor plugin, a judge) pin
 // against these.
 // ---------------------------------------------------------------------------
-static const char* COMPILER_VERSION = "1.16.0";
+static const char* COMPILER_VERSION = "1.16.1";
 static const char* WISH_VERSION     = "1.0";
 static const char* GENIE_VERSION    = "1.0";
 
@@ -3655,8 +3655,20 @@ static Judged checkGenieSource(const std::string& genie) {
 // to `provideDocumentFormattingEdits`.
 static std::string formatSource(const std::string& text, bool genie) {
     g_src = { genie ? "playground.genie" : "playground.wish", text };
-    try { return genie ? formatGenie(text) : formatWish(text); }
-    catch (const Fatal&) { return std::string(); }
+    // The diagnostic is written before `fail` throws, so both streams have to be
+    // caught and dropped. An editor formats on every save; left alone, each save
+    // of a half-written file would print a full colour diagnostic into the
+    // extension host log, for an answer the caller already has as "".
+    std::ostringstream sink;
+    std::streambuf* o = std::cout.rdbuf(sink.rdbuf());
+    std::streambuf* e = std::cerr.rdbuf(sink.rdbuf());
+    std::string out;
+    try { out = genie ? formatGenie(text) : formatWish(text); }
+    catch (const Fatal&) { out.clear(); }
+    std::cout.flush();
+    std::cout.rdbuf(o);
+    std::cerr.rdbuf(e);
+    return out;
 }
 
 static std::string defaultGenie() { return DEFAULT_GENIE; }

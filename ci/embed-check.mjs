@@ -84,5 +84,34 @@ const judge = (src) => M.judge(src, '', false, false, 0, 0);
     check('and quotes the line', /layer ast/.test(e?.source ?? ''), e?.source);
 }
 
+// 5. Formatting, the entry an editor's format-on-save uses.
+{
+    const messy = 'register  wishes : uint<2> = 3\nwish   w {   sub wishes,3   }\n';
+    const out = M.format(messy, false);
+    check('a messy file comes back canonical', /^register wishes : uint<2> = 3\n/.test(out),
+          JSON.stringify(out.slice(0, 40)));
+    check('formatting is idempotent', M.format(out, false) === out,
+          JSON.stringify(M.format(out, false)));
+
+    // A file that does not parse gets nothing back -- and, just as important,
+    // says nothing. An editor formats on every save, so a diagnostic printed
+    // here would fill the extension host log with one colour block per
+    // keystroke-and-save of a half-written file.
+    const before = { out: [], err: [] };
+    const so = process.stdout.write.bind(process.stdout);
+    const se = process.stderr.write.bind(process.stderr);
+    process.stdout.write = (s) => (before.out.push(s), true);
+    process.stderr.write = (s) => (before.err.push(s), true);
+    const bad = M.format('wish x { sub wishes, 1; }', false);
+    process.stdout.write = so; process.stderr.write = se;
+    check('an unparseable file formats to nothing', bad === '', JSON.stringify(bad));
+    check('and prints nothing while doing it',
+          before.out.length === 0 && before.err.length === 0,
+          JSON.stringify([...before.out, ...before.err].join('').slice(0, 60)));
+
+    check('a genie formats too', /^counter wishes/.test(M.format(M.defaultGenie(), true)),
+          JSON.stringify(M.format(M.defaultGenie(), true).slice(0, 30)));
+}
+
 if (!failed) console.log('  ok   embedded api');
 process.exit(failed);

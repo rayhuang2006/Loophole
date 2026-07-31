@@ -6,6 +6,14 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.16.1 — wish 1.0, genie 1.0
+
+`format()` in the browser build printed the diagnostic before returning nothing.
+An editor formats on every save, so each save of a half-written file would have
+dropped a full colour diagnostic into the extension host log for an answer the
+caller already had as `""`. Both streams are captured now, the way `judge()` has
+always captured them.
+
 ## loophole 1.16.0 — wish 1.0, genie 1.0
 
 **`loophole --format` prints a file in canonical form.** One form, no options —
