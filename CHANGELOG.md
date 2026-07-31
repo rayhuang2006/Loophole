@@ -6,6 +6,48 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.16.0 — wish 1.0, genie 1.0
+
+**`loophole --format` prints a file in canonical form.** One form, no options —
+the `gofmt` position, because a formatter with settings is a format argument with
+extra steps. It reads both languages, and the browser build exposes
+`format(text, isGenie)`.
+
+The shape, decided rather than defaulted:
+
+- declarations align their columns, and a blank line starts a new block — so
+  adding a long `attribute` reflows its own group instead of every line above it
+- trailing comments align by the same rule
+- exactly one blank line between top-level items, and a comment block the author
+  separated from the code stays separated
+
+**Comments survive.** The lexer used to drop them on the floor; it now keeps them
+on a side channel that no parser ever sees. A formatter that lost comments would
+be a formatter nobody could run twice.
+
+It emits from the parsed program rather than by shuffling tokens, so a one-line
+body expands and a crooked one straightens. The token stream alone cannot say
+where one statement ends and the next begins — that is grammar, not lexing. A
+file that does not parse is **refused**, not guessed at; `gofmt` refuses for the
+same reason.
+
+### Checked by its properties, not by a golden
+
+A golden would assert "the output is this text", which is a fact about today's
+taste. These are facts about whether it works:
+
+- **idempotent** — `format(format(x)) == format(x)`, and the output must parse.
+  Verified to fire by making the formatter emit something it cannot read back.
+- **verdict-preserving** — `ci/format-check.py` judges every example and every
+  genie twice, before and after formatting, and the two judgments must match
+  exactly. Positions are excluded, since moving lines is the point. Verified to
+  fire by making the genie formatter print `toll` off by one.
+
+Worth recording honestly: three attempts to break idempotence were absorbed
+rather than caught, because the output is regenerated from the parse tree and
+incidental whitespace cannot accumulate. That is a property of the design, not of
+the check — the check earns its place on the "must parse" half, which did fire.
+
 ## loophole 1.15.0 — wish 1.0, genie 1.0
 
 **`--json` and `--check-genie` report what was declared, and where.** A `symbols`

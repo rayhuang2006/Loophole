@@ -66,7 +66,7 @@
 // whichever language grew it. Dependants (an editor plugin, a judge) pin
 // against these.
 // ---------------------------------------------------------------------------
-static const char* COMPILER_VERSION = "1.15.0";
+static const char* COMPILER_VERSION = "1.16.0";
 static const char* WISH_VERSION     = "1.0";
 static const char* GENIE_VERSION    = "1.0";
 
@@ -329,7 +329,8 @@ struct Commitment {
 // A person is a bundle of named numeric attributes (§4.2 of the spec). The old
 // single `alive` bit is gone; "alive" is now whatever a genie says it is, and
 // the built-in reading (`personAlive`) is just "some vital is still nonzero".
-struct AttrSchema { std::string name; int width = 1; uint64_t deflt = 0; };
+struct AttrSchema { std::string name; int width = 1; uint64_t deflt = 0;
+                    int line = 0; };
 
 struct World {
     std::map<std::string, Reg> regs;
@@ -544,8 +545,13 @@ struct Token {
     int col  = 1;      // 1-based, in bytes; §3 makes every construct ASCII
 };
 
+// A comment, and whether it had the line to itself. Trailing comments belong to
+// the construct they sit beside; own-line comments belong above the next one.
+struct Comment { int line; std::string text; bool own_line; };
+
 struct Lexer {
     std::string s;
+    std::vector<Comment> comments;
     size_t i = 0;
     int line = 1;
     size_t bol = 0;              // offset of the current line's first byte
@@ -564,7 +570,18 @@ struct Lexer {
             char c = s[i];
             if (c == '\n') { line++; i++; bol = i; continue; }
             if (std::isspace((unsigned char)c)) { i++; continue; }
-            if (c == '#') { while (i < s.size() && s[i] != '\n') i++; continue; }
+            if (c == '#') {
+                // Kept, not discarded. A formatter that dropped comments would
+                // be a formatter nobody could run twice. The parsers never see
+                // this vector, so nothing else changes.
+                size_t start = i;
+                bool own_line = true;
+                for (size_t k = bol; k < start; k++)
+                    if (!std::isspace((unsigned char)s[k])) { own_line = false; break; }
+                while (i < s.size() && s[i] != '\n') i++;
+                comments.push_back({ line, std::string(s, start, i - start), own_line });
+                continue;
+            }
 
             if (c == '-' && i + 1 < s.size() && s[i + 1] == '>') {
                 out.push_back({Tok::Arrow, "->", 0, line, col()}); i += 2; continue;
@@ -663,7 +680,7 @@ struct Lexer {
 // The two can differ once definitions exist, and every interesting thing in
 // Phase 2 happens in that gap.
 // ---------------------------------------------------------------------------
-struct Decl { std::string name; int width; uint64_t init; };
+struct Decl { std::string name; int width; uint64_t init; int line = 0; };
 
 enum class StmtKind { Op, Define, Promise };
 
@@ -727,6 +744,7 @@ struct Program {
     std::vector<Decl> decls;
     std::vector<AttrSchema> attrs;
     std::vector<std::string> people;
+    std::vector<int> people_lines;      // parallel to `people`; see Symbol
     std::vector<Wish> wishes;
     std::vector<Symbol> symbols;
 };
@@ -1113,7 +1131,7 @@ struct Parser {
                 int w = parseWidth();
                 eat(Tok::Eq, "'='");
                 uint64_t init = eat(Tok::Int, "initial value").num;
-                prog.decls.push_back({name, w, init});
+                prog.decls.push_back({name, w, init, line});
                 prog.symbols.push_back({ "register", name, line, line,
                                          "uint<" + std::to_string(w) + ">", "" });
                 continue;
@@ -1126,7 +1144,7 @@ struct Parser {
                 int w = parseWidth();
                 eat(Tok::Eq, "'='");
                 uint64_t init = eat(Tok::Int, "default value").num;
-                prog.attrs.push_back({name, w, init & Reg::mask_for(w)});
+                prog.attrs.push_back({name, w, init & Reg::mask_for(w), line});
                 prog.symbols.push_back({ "attribute", name, line, line,
                                          "uint<" + std::to_string(w) + ">", "" });
                 continue;
@@ -1140,6 +1158,7 @@ struct Parser {
                     int line = cur().line;
                     std::string who = eat(Tok::Ident, "a person's name").text;
                     prog.people.push_back(who);
+                    prog.people_lines.push_back(line);
                     prog.symbols.push_back({ "person", who, line, line, "", "" });
                     if (cur().kind != Tok::Comma) break;
                     p++;
@@ -2065,6 +2084,243 @@ struct PolicyParser {
     }
 };
 
+// ---------------------------------------------------------------------------
+// The formatter.
+//
+// One canonical form, no options -- the `gofmt` position. A formatter with
+// settings is a format argument with extra steps.
+//
+// It emits from the parsed program rather than by shuffling tokens, so a
+// one-line body expands and a wrongly-indented one straightens; the token
+// stream alone cannot tell where one statement ends and the next begins,
+// because that is grammar, not lexing.
+//
+// Comments come back by line number. There is at most one per line (`#` runs to
+// the end of it), so a map from line to text is enough: an own-line comment is
+// emitted above the construct that follows it, a trailing one beside the
+// construct it shared a line with. A formatter that dropped comments would be a
+// formatter nobody could run twice.
+//
+// The three shapes were chosen deliberately (see docs/DESIGN.md):
+//   * declarations align their columns, and a blank line starts a new block --
+//     so adding a long name reflows its own group and not the whole file
+//   * trailing comments align by the same rule
+//   * exactly one blank line between top-level items
+// ---------------------------------------------------------------------------
+struct Formatter {
+    std::map<int, std::string> trailing;   // line -> comment on that line
+    std::map<int, std::string> own;        // line -> comment owning that line
+    std::string out;
+    int emitted_upto = 0;                  // highest source line already passed
+
+    explicit Formatter(const std::vector<Comment>& cs) {
+        for (const auto& c : cs) (c.own_line ? own : trailing)[c.line] = c.text;
+    }
+
+    // Own-line comments sitting between what was last emitted and `line`.
+    void commentsBefore(int line, const std::string& indent) {
+        int last = 0;
+        for (auto it = own.upper_bound(emitted_upto); it != own.end(); ++it) {
+            if (it->first >= line) break;
+            out += indent + it->second + "\n";
+            last = it->first;
+        }
+        // A comment block the author separated from the code stays separated.
+        // Glued on, a file's header paragraph reads as a caption for the first
+        // declaration rather than for the file.
+        if (last && line - last > 1) out += "\n";
+        emitted_upto = line;
+    }
+    std::string trail(int line) const {
+        auto it = trailing.find(line);
+        return it == trailing.end() ? std::string() : it->second;
+    }
+    // Everything left over, so a comment at the end of the file survives.
+    void rest() {
+        for (auto it = own.upper_bound(emitted_upto); it != own.end(); ++it)
+            out += it->second + "\n";
+    }
+};
+
+// A block of lines that align together: pad each `code` to the widest, then put
+// the comment after it. `at` is the column the comments line up on.
+static void emitAligned(std::string& out,
+                        const std::vector<std::pair<std::string, std::string>>& rows,
+                        const std::string& indent) {
+    size_t w = 0;
+    for (const auto& r : rows) if (!r.second.empty()) w = std::max(w, r.first.size());
+    for (const auto& r : rows) {
+        if (r.second.empty()) { out += indent + r.first + "\n"; continue; }
+        out += indent + r.first + std::string(w - r.first.size() + 2, ' ')
+             + r.second + "\n";
+    }
+}
+
+static std::string formatWish(const std::string& text) {
+    Lexer lx(text);
+    std::vector<Token> toks = lx.run();
+    Program prog = Parser(toks).parse();     // validate; a broken file is not formatted
+    Formatter f(lx.comments);
+
+    // --- declarations, aligned in blocks -----------------------------------
+    // A "block" is a run of declarations with no blank line and no own-line
+    // comment between them. That is the `gofmt` rule, and it is what keeps a
+    // new `attribute respiration` from reflowing every line above it.
+    struct Row { int line; std::string kind, name, tail; };
+    std::vector<Row> rows;
+    for (const auto& d : prog.decls)
+        rows.push_back({ d.line, "register", d.name,
+                         ": uint<" + std::to_string(d.width) + "> = "
+                         + std::to_string(d.init) });
+    for (const auto& a : prog.attrs)
+        rows.push_back({ a.line, "attribute", a.name,
+                         ": uint<" + std::to_string(a.width) + "> = "
+                         + std::to_string(a.deflt) });
+    for (size_t i = 0; i < prog.people.size(); i++)
+        rows.push_back({ prog.people_lines[i], "people", prog.people[i], "" });
+    std::sort(rows.begin(), rows.end(),
+              [](const Row& a, const Row& b) { return a.line < b.line; });
+
+    // `people alice, rival` is one declaration however many names it holds.
+    std::vector<Row> merged;
+    for (const auto& r : rows) {
+        if (r.kind == "people" && !merged.empty() && merged.back().kind == "people") {
+            merged.back().name += ", " + r.name;
+            merged.back().line = std::min(merged.back().line, r.line);
+            continue;
+        }
+        merged.push_back(r);
+    }
+
+    size_t kw = 0, nw = 0;
+    for (const auto& r : merged) {
+        kw = std::max(kw, r.kind.size());
+        if (!r.tail.empty()) nw = std::max(nw, r.name.size());
+    }
+    std::vector<std::pair<std::string, std::string>> block;
+    auto flush = [&]() { emitAligned(f.out, block, ""); block.clear(); };
+
+    int prev = 0;
+    for (const auto& r : merged) {
+        // A blank line or an own-line comment ends the alignment block.
+        bool gap = prev && (r.line - prev > 1);
+        if (gap) { flush(); f.commentsBefore(r.line, ""); f.out += "\n"; }
+        else f.commentsBefore(r.line, "");
+        std::string code = r.kind + std::string(kw - r.kind.size() + 1, ' ') + r.name;
+        if (!r.tail.empty())
+            code += std::string(nw - r.name.size() + 1, ' ') + r.tail;
+        block.push_back({ code, f.trail(r.line) });
+        prev = r.line;
+        f.emitted_upto = r.line;
+    }
+    flush();
+
+    // --- wishes -------------------------------------------------------------
+    for (const auto& w : prog.wishes) {
+        f.out += "\n";                       // exactly one blank line between items
+        f.commentsBefore(w.line, "");
+        std::string head = "wish " + w.name + " {";
+        std::string t = f.trail(w.line);
+        f.out += t.empty() ? head + "\n" : head + "  " + t + "\n";
+        f.emitted_upto = w.line;
+
+        std::vector<std::pair<std::string, std::string>> body;
+        int bprev = w.line;
+        for (const auto& st : w.body) {
+            if (st.line - bprev > 1) { emitAligned(f.out, body, "    "); body.clear();
+                                       f.commentsBefore(st.line, "    ");
+                                       f.out += "\n"; }
+            else f.commentsBefore(st.line, "    ");
+            body.push_back({ stmtText(st), f.trail(st.line) });
+            bprev = st.line;
+            f.emitted_upto = st.line;
+        }
+        emitAligned(f.out, body, "    ");
+        f.out += "}\n";
+        f.emitted_upto = std::max(f.emitted_upto, w.line);
+    }
+    f.rest();
+    return f.out;
+}
+
+// The genie, same shape. `symbols` already records where each construct began
+// and ended, so this walks that rather than growing a second set of line fields.
+static std::string formatGenie(const std::string& text) {
+    Lexer lx(text);
+    std::vector<Token> toks = lx.run();
+    Genie g = PolicyParser(toks).parse();    // validate first, as `formatWish` does
+    Formatter f(lx.comments);
+
+    auto emitHeader = [&](const std::string& code, int line) {
+        f.commentsBefore(line, "");
+        std::string t = f.trail(line);
+        f.out += t.empty() ? code + "\n" : code + "  " + t + "\n";
+        f.emitted_upto = line;
+    };
+
+    // `counter` and `toll` come first and align with each other, because they
+    // are the two numbers a reader looks for.
+    int head = g.symbols.empty() ? 0 : g.symbols.front().line;
+    (void)head;
+    std::vector<std::pair<std::string, std::string>> top;
+    top.push_back({ "counter " + g.counter, "" });
+    top.push_back({ "toll    " + std::to_string(g.toll), "" });
+    emitAligned(f.out, top, "");
+
+    for (const auto& sy : g.symbols) {
+        f.out += "\n";
+        if (sy.kind == "concept") {
+            const PolicyConcept* c = findConcept(g, sy.name);
+            if (!c) continue;
+            emitHeader("concept " + c->name + "(" + c->param + ") := "
+                       + exprText(c->body), sy.line);
+            continue;
+        }
+        if (sy.kind == "rule") {
+            const PolicyRule* r = nullptr;
+            for (const auto& x : g.rules) if (x.name == sy.name) r = &x;
+            if (!r) continue;
+            emitHeader("rule " + r->name + " {", sy.line);
+            std::string verbs;
+            std::string on;
+            for (size_t i = 0; i < r->forbid.size(); i++) {
+                verbs += (i ? ", " : "") + r->forbid[i].verb;
+                if (!r->forbid[i].on.empty()) on = r->forbid[i].on;
+            }
+            std::vector<std::pair<std::string, std::string>> body = {
+                { "layer   " + std::string(r->layer == Layer::Surface ? "surface" : "ast"), "" },
+                { "forbid  " + verbs + (on.empty() ? "" : " on " + on), "" },
+                { "because \"" + r->because + "\"", "" },
+            };
+            emitAligned(f.out, body, "    ");
+            f.out += "}\n";
+            f.emitted_upto = std::max(f.emitted_upto, sy.end_line);
+            continue;
+        }
+        if (sy.kind == "invariant") {
+            const PolicyInvariant* inv = nullptr;
+            for (const auto& x : g.invariants) if (x.name == sy.name) inv = &x;
+            if (!inv) continue;
+            emitHeader("invariant " + inv->name + " {", sy.line);
+            std::vector<std::pair<std::string, std::string>> body;
+            std::string w = exprText(inv->written), r = exprText(inv->real);
+            // `check` is shorthand for the two columns being the same thing, and
+            // printing it back that way is the difference between a genie that
+            // says "these agree" and one that merely happens to.
+            if (w == r) body.push_back({ "check " + w, "" });
+            else { body.push_back({ "written " + w, "" });
+                   body.push_back({ "real    " + r, "" }); }
+            if (!inv->label.empty() && inv->label != w)
+                body.push_back({ "label \"" + inv->label + "\"", "" });
+            emitAligned(f.out, body, "    ");
+            f.out += "}\n";
+            f.emitted_upto = std::max(f.emitted_upto, sy.end_line);
+        }
+    }
+    f.rest();
+    return f.out;
+}
+
 static Genie loadGenie(const std::string& text) {
     return PolicyParser(Lexer(text).run()).parse();
 }
@@ -2886,6 +3142,7 @@ static void usage() {
         "usage: loophole [--genie FILE] [--json] <file.wish>\n"
         "       loophole [--genie FILE] --hunt <file.wish> [--max-stmts N] [--max-wishes N] [--max-imm N]\n"
         "       loophole --check-genie <file.genie>\n"
+        "       loophole --format <file>\n"
         "       loophole --dump-genie | --version\n"
         "\n"
         "  --hunt        ignore the file's wishes; enumerate every wish program within\n"
@@ -2897,6 +3154,8 @@ static void usage() {
         "                tools depend on; the prose report is not.\n"
         "  --check-genie FILE  parse a genie on its own and report whether it is\n"
         "                well-formed. Judges no wishes; syntax only.\n"
+        "  --format FILE print the file in canonical form. One form, no options;\n"
+        "                a file that does not parse is refused, not guessed at.\n"
         "  --dump-genie  print the built-in genie, so you have a file to edit.\n"
         "  --version     print compiler and language versions.\n"
         "\n"
@@ -2918,6 +3177,7 @@ static int cliMain(int argc, char** argv) {
     const char* path = nullptr;
     const char* genie_path = nullptr;
     const char* check_genie = nullptr;
+    const char* format_path = nullptr;
 
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -2932,12 +3192,27 @@ static int cliMain(int argc, char** argv) {
         else if (a == "--keywords")   { emitKeywords(std::cout); return 0; }
         else if (a == "--genie" && i + 1 < argc) genie_path = argv[++i];
         else if (a == "--check-genie" && i + 1 < argc) check_genie = argv[++i];
+        else if (a == "--format" && i + 1 < argc) format_path = argv[++i];
         else if (a == "--hunt") { hunt = true; }
         else if (a == "--max-stmts"  && i + 1 < argc) hc.max_stmts  = std::atoi(argv[++i]);
         else if (a == "--max-wishes" && i + 1 < argc) hc.max_wishes = std::atoi(argv[++i]);
         else if (a == "--max-imm"    && i + 1 < argc) hc.max_imm    = std::strtoull(argv[++i], nullptr, 10);
         else if (!a.empty() && a[0] == '-') { usage(); return 2; }
         else path = argv[i];
+    }
+
+    // Print the file in canonical form. Parses first and refuses a file it
+    // cannot read -- formatting broken input would mean guessing at what the
+    // author meant, and `gofmt` refuses for the same reason.
+    if (format_path) {
+        std::ifstream ff(format_path);
+        if (!ff) { std::cerr << "cannot open " << format_path << "\n"; return 2; }
+        std::stringstream fs; fs << ff.rdbuf();
+        g_src = { format_path, fs.str() };
+        std::string dot = format_path;
+        bool is_genie = dot.size() > 6 && dot.substr(dot.size() - 6) == ".genie";
+        std::cout << (is_genie ? formatGenie(fs.str()) : formatWish(fs.str()));
+        return 0;
     }
 
     // Read a genie on its own and say only whether it parses. A genie is the
@@ -3374,6 +3649,16 @@ static Judged checkGenieSource(const std::string& genie) {
     return r;
 }
 
+// Formatting for the browser build. Returns the canonical text, or the empty
+// string when the source does not parse -- an editor asking to format a broken
+// file should leave it exactly as it is, which is what returning nothing means
+// to `provideDocumentFormattingEdits`.
+static std::string formatSource(const std::string& text, bool genie) {
+    g_src = { genie ? "playground.genie" : "playground.wish", text };
+    try { return genie ? formatGenie(text) : formatWish(text); }
+    catch (const Fatal&) { return std::string(); }
+}
+
 static std::string defaultGenie() { return DEFAULT_GENIE; }
 static std::string keywordsJson() {
     std::ostringstream o; emitKeywords(o); return o.str();
@@ -3389,6 +3674,7 @@ EMSCRIPTEN_BINDINGS(loophole) {
         .field("json", &Judged::json);
     emscripten::function("judge", &judgeSource);
     emscripten::function("checkGenie", &checkGenieSource);
+    emscripten::function("format", &formatSource);
     emscripten::function("defaultGenie", &defaultGenie);
     emscripten::function("keywords", &keywordsJson);
     emscripten::function("versions", &versions);

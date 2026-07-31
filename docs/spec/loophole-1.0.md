@@ -532,7 +532,9 @@ A conforming implementation MUST:
 5. Introduce no construct that violates the non-goals of § 1.2.
 
 An implementation MAY provide additional tools (formatting, search, a REPL);
-these are non-normative.
+these are non-normative. Where an implementation formats source, the result MUST
+parse and MUST yield the same judgment as the text it was produced from: a
+formatter that changed what a program means would be changing the language.
 
 ### 10.1 The tool contract
 

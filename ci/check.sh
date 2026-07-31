@@ -176,6 +176,36 @@ kinds = {s["kind"] for s in json.load(sys.stdin)["symbols"]}
 assert kinds == {"concept", "rule", "invariant"}, kinds
 ' 2>/dev/null || { echo "FAIL --check-genie symbols are wrong"; rc=1; }
   fi
+  # The formatter, checked by its two properties rather than against a golden.
+  # A golden would say "the output is this text", which is a fact about today's
+  # taste. These are facts about whether the thing works at all:
+  #
+  #   idempotent          format(format(x)) == format(x). Fails the moment the
+  #                       output is not itself in canonical form, which is how a
+  #                       formatter ends up fighting a save-on-format editor.
+  #   verdict-preserving  the compiler judges the formatted file exactly as it
+  #                       judged the original. A formatter that silently changed
+  #                       what a program means would be the worst tool here.
+  #
+  # Positions are excluded from the second: reformatting moves lines, and that is
+  # the point of it.
+  if command -v python3 >/dev/null; then
+    ft=$(mktemp -d)
+    for f in examples/*.wish genie/*.genie; do
+      ext="${f##*.}"
+      ./loophole --format "$f" > "$ft/a.$ext" 2>/dev/null \
+        || { echo "FAIL --format could not format $f"; rc=1; continue; }
+      ./loophole --format "$ft/a.$ext" > "$ft/b.$ext" 2>/dev/null \
+        || { echo "FAIL --format cannot re-read its own output for $f"; rc=1; continue; }
+      cmp -s "$ft/a.$ext" "$ft/b.$ext" || { echo "FAIL --format is not idempotent on $f"; rc=1; }
+    done
+    # A file it cannot parse must be refused, not guessed at (`gofmt` refuses too).
+    printf 'register wishes : uint<2> = 3\nwish x { sub wishes, 1; }\n' > "$ft/bad.wish"
+    ./loophole --format "$ft/bad.wish" >/dev/null 2>&1
+    [ $? -eq 2 ] || { echo "FAIL --format accepted a file that does not parse"; rc=1; }
+    rm -rf "$ft"
+    python3 ci/format-check.py || rc=1
+  fi
   # A genie checked on its own: parses -> 0 and silent about wishes (there are
   # none), does not parse -> 2 with the same structured error a wish would get.
   # This is what lets an editor squiggle a `.genie` nobody has run yet.
