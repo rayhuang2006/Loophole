@@ -6,6 +6,32 @@ moves the compiler; a new concept moves whichever language grew it.
 
 Releases before 1.1.0 were published under the compiler's old name, `wishc`.
 
+## loophole 1.16.2 — wish 1.0, genie 1.0
+
+`--format` printed a trailing comment twice when a wish header and its first
+statement were written on the same source line. Both asked for that line's
+comment and both were given it:
+
+```
+wish tidy {   define mercy := kill   # 別名      ->   wish tidy {  # 別名
+                                                          define mercy := kill  # 別名
+```
+
+Two fixes, because there were two things wrong. A comment is now consumed when
+it is claimed, so nothing can be emitted twice; and a header does not claim the
+comment on its line at all when a statement shares that line, because
+`wish w { sub x, 1  # why` is a note about `sub`.
+
+**Neither of the formatter's existing properties could see this.** Idempotence
+could not: after the first pass the duplicate sits on its own line and the second
+pass keeps one of each, so the output is stable. Verdict-preservation could not:
+a duplicated comment changes no judgment. It was found by reading the output.
+
+So there is a third property now — **formatting neither invents a comment nor
+loses one** — plus one case pinning where a shared-line comment lands. Both were
+checked by putting each bug back; the count-based one needs *both* fixes reverted
+before it fires, since either alone prevents the duplication.
+
 ## loophole 1.16.1 — wish 1.0, genie 1.0
 
 `format()` in the browser build printed the diagnostic before returning nothing.

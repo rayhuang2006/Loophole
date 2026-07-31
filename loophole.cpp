@@ -66,7 +66,7 @@
 // whichever language grew it. Dependants (an editor plugin, a judge) pin
 // against these.
 // ---------------------------------------------------------------------------
-static const char* COMPILER_VERSION = "1.16.1";
+static const char* COMPILER_VERSION = "1.16.2";
 static const char* WISH_VERSION     = "1.0";
 static const char* GENIE_VERSION    = "1.0";
 
@@ -2131,9 +2131,17 @@ struct Formatter {
         if (last && line - last > 1) out += "\n";
         emitted_upto = line;
     }
-    std::string trail(int line) const {
+    // Consumes. A construct may only claim a trailing comment once -- when a
+    // wish header and its first statement were written on the same source line,
+    // both used to ask for that line and both used to get it, so the comment
+    // came out twice. Idempotence does not catch that: after the first pass the
+    // two are on separate lines and each keeps one.
+    std::string trail(int line) {
         auto it = trailing.find(line);
-        return it == trailing.end() ? std::string() : it->second;
+        if (it == trailing.end()) return {};
+        std::string t = it->second;
+        trailing.erase(it);
+        return t;
     }
     // Everything left over, so a comment at the end of the file survives.
     void rest() {
@@ -2220,7 +2228,11 @@ static std::string formatWish(const std::string& text) {
         f.out += "\n";                       // exactly one blank line between items
         f.commentsBefore(w.line, "");
         std::string head = "wish " + w.name + " {";
-        std::string t = f.trail(w.line);
+        // A comment on the header's line belongs to the statement that shared it,
+        // not to the header -- `wish w { sub x, 1  # why` is a note about `sub`.
+        bool shared = false;
+        for (const auto& st : w.body) if (st.line == w.line) shared = true;
+        std::string t = shared ? std::string() : f.trail(w.line);
         f.out += t.empty() ? head + "\n" : head + "  " + t + "\n";
         f.emitted_upto = w.line;
 
